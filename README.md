@@ -1,0 +1,2 @@
+# typegraph
+Type Auto Switch
