@@ -1,0 +1,28 @@
+[project]
+name = "typegraph"
+version = "0.1.0"
+description = "Type Auto Switch"
+authors = [
+    {name = "luxuncang", email = "luxuncang@qq.com"},
+]
+dependencies = [
+    "typing-inspect>=0.9.0",
+    "networkx>=3.3",
+    "pytypes>=1.0b10",
+]
+requires-python = ">=3.10"
+readme = "README.md"
+license = {text = "MIT"}
+
+[build-system]
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
+
+
+[tool.pdm]
+distribution = true
+
+[tool.pdm.scripts]
+
+test = "python -m unittest"
+dev = "python tests/dev.py"
