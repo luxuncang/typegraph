@@ -53,6 +53,7 @@ class TypeConverter:
     def __init__(self):
         self.G = nx.DiGraph()
         self.vG = nx.DiGraph()
+        self.gG = nx.DiGraph()
         TypeConverter.instances.append(self)
 
     def _gen_edge(

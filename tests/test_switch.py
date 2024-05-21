@@ -92,6 +92,15 @@ class TypeConverterTests(unittest.TestCase):
         self.converter.register_converter(int, str)(str)
         self.converter.register_converter(str, int)(int)
 
+        from typing import TypeVar
+
+        K = TypeVar("K")
+        V = TypeVar("V")
+
+        # self.converter.register_converter(dict[K, V], dict[K, V])(lambda d:{value:key for key, value in d.items()})
+        # result = self.converter.convert({10: "a", 20: "b"}, dict[str, int])
+        # self.assertEqual(result, {"a": 10, "b": 20})
+
         result = self.converter.convert(10, str)
         self.assertEqual(result, "10")
 

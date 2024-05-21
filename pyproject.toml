@@ -1,6 +1,6 @@
 [project]
-name = "typegraph"
-version = "0.1.0"
+name = "typegraph3"
+version = "0.0.1"
 description = "Type Auto Switch"
 authors = [
     {name = "luxuncang", email = "luxuncang@qq.com"},

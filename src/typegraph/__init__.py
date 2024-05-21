@@ -1,1 +1,1 @@
-from .core import TypeConverter, TypeVarModel, deep_type
+from .core import TypeConverter, TypeVarModel, deep_type, infer_generic_type

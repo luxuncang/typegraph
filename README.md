@@ -1,4 +1,4 @@
-# TypeGraph
+# TypeGraph3
 
 ## 概述
 **类型转换器 (TypeConverter)** 是一个 Python 库，用于在不同类型之间进行类型转换，包括自定义类型、内置类型和结构类型（如列表、集合和字典）。它支持同步和异步的转换方法。
@@ -13,7 +13,7 @@
 使用以下命令安装运行该库所需的依赖项：
 
 ```sh
-pip install typegraph
+pip install typegraph3
 ```
 
 ## 入门指南
@@ -22,7 +22,7 @@ pip install typegraph
 注册同步转换器并使用：
 
 ```python
-from typegraph.core import TypeConverter
+from typegraph3 import TypeConverter
 
 converter = TypeConverter()
 
@@ -39,7 +39,7 @@ print(result)
 
 ```python
 import asyncio
-from typegraph.core import TypeConverter
+from typegraph3 import TypeConverter
 
 converter = TypeConverter()
 
@@ -60,7 +60,7 @@ asyncio.run(test_async_conversion())
 #### 同步
 
 ```python
-from typegraph.core import TypeConverter
+from typegraph3 import TypeConverter
 
 converter = TypeConverter()
 
@@ -79,7 +79,7 @@ print(result)
 #### 异步
 
 ```python
-from typegraph.core import TypeConverter
+from typegraph3 import TypeConverter
 import asyncio
 
 converter = TypeConverter()
@@ -118,7 +118,7 @@ pytest test_switch.py
 您可以可视化类型转换图：
 
 ```python
-from typegraph import TypeConverter
+from typegraph3 import TypeConverter
 
 t = TypeConverter()
 
