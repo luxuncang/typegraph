@@ -1,9 +1,15 @@
 import inspect
+import asyncio
 from typing import (
     TypeVar,
     ParamSpec,
     Callable,
     List,
+    Tuple,
+    Dict,
+    Set,
+    Iterable,
+    Iterator,
     cast,
     Type,
     Awaitable,
@@ -11,14 +17,14 @@ from typing import (
     Optional,
     Annotated,
 )
-from functools import wraps, reduce
+from functools import wraps, reduce, partial
 from dataclasses import dataclass
 
-from typing_extensions import get_args
+from typing_extensions import get_args, get_origin
 from typing_inspect import is_union_type, is_typevar, get_generic_type
 import networkx as nx
 
-from .type_utils import get_origin, is_structural_type, deep_type
+from .type_utils import get_origin as get_real_origin, is_structural_type, deep_type
 
 
 T = TypeVar("T")
@@ -36,12 +42,10 @@ def get_all_subclasses(cls):
 def generate_type(generic: Type[Any], instance: List[Type[Any]]):
     return generic[tuple(instance)]
 
-def sync_iter(input_type: Type[In], out_type: Type[Out]):
-    from typing import get_origin
-    if is_structural_type(input_type) and is_structural_type(out_type):
-        if get_origin(input_type) == get_origin(out_type):
-            yield get_args(input_type), get_args(out_type)
-            
+
+def _wrapper_converter(origin, func, datas):
+    return reduce(func)  # type: ignore
+
 
 class TypeConverter:
     instances: List["TypeConverter"] = []
@@ -91,13 +95,14 @@ class TypeConverter:
         in_type: Type[In],
         out_type: Type[Out],
         sub_class: bool = False,
-        input_value=None,
+        input_value: Any = None,
+        origin_func: Optional[Callable] = None,
     ):
         """
         [X] SubClass type
         [X] Union type
-        [ ] Annotated type
-        [ ] Structural type
+        [X] Annotated type
+        [X] Structural type
         [ ] Generic type
         """
 
@@ -105,21 +110,25 @@ class TypeConverter:
             for path, converters in self.get_all_paths(
                 in_type, out_type, full=sub_class
             ):
-                yield path, reduce(lambda f, g: lambda x: g(f(x)), converters)
+                func = reduce(lambda f, g: lambda x: g(f(x)), converters)
+                if origin_func:
+                    yield path, partial(partial(_wrapper_converter, origin_func), func)
+                else:
+                    yield path, func
         if is_union_type(out_type):
             for out_type in get_args(out_type):
                 if self.can_convert(in_type, out_type, full=sub_class):
                     for path, converters in self.get_all_paths(
                         in_type, out_type, full=sub_class
                     ):
-                        yield path, reduce(lambda f, g: lambda x: g(f(x)), converters)
-        if input_value is not None:
-            deep_in_type = deep_type(input_value)
-            if self.can_convert(in_type, out_type, full=sub_class):
-                for path, converters in self.get_all_paths(
-                    in_type, out_type, full=sub_class
-                ):
-                    yield path, reduce(lambda f, g: lambda x: g(f(x)), converters)
+                        func = reduce(lambda f, g: lambda x: g(f(x)), converters)
+                        if origin_func:
+                            yield (
+                                path,
+                                partial(partial(_wrapper_converter, origin_func), func),
+                            )
+                        else:
+                            yield path, func
 
     async def async_get_converter(
         self,
@@ -157,7 +166,9 @@ class TypeConverter:
             input_value = converter(input_value)
         return input_value
 
-    def _get_obj_type(self, obj, full: bool = False):
+    def _get_obj_type(
+        self, obj, full: bool = False, depth: int = 10, max_sample: int = -1
+    ):
         if full:
             return deep_type(obj)
         return get_generic_type(obj)
@@ -169,7 +180,7 @@ class TypeConverter:
         sub_class: bool = False,
         debug: bool = False,
     ) -> Out:
-        input_type = self._get_obj_type(input_value)
+        input_type = self._get_obj_type(input_value, full=True)
         all_converters = self.get_converter(
             input_type, out_type, sub_class, input_value
         )
@@ -183,6 +194,40 @@ class TypeConverter:
                     return converter(input_value)
                 except Exception:
                     continue
+        if is_structural_type(input_type) and is_structural_type(out_type):
+            in_origin = get_origin(input_type)
+            out_origin = get_origin(out_type)
+            if in_origin == out_origin:
+                in_args = get_args(input_type)
+                out_args = get_args(out_type)
+
+                def _iter_func(item):
+                    return self.convert(
+                        item, out_args[0], sub_class=sub_class, debug=debug
+                    )
+
+                def __iter_func_dict(item):
+                    k, v = item
+                    return self.convert(
+                        k, out_args[0], sub_class=sub_class, debug=debug
+                    ), self.convert(v, out_args[1], sub_class=sub_class, debug=debug)
+
+                if in_origin == list or out_origin == List:
+                    res = list(map(_iter_func, input_value))
+                elif in_origin == tuple or out_origin == Tuple:
+                    res = tuple(map(_iter_func, input_value))
+                elif in_origin == set or out_origin == Set:
+                    res = set(map(_iter_func, input_value))
+                elif out_origin in (Iterable, Iterator):
+                    res = map(_iter_func, input_value)
+                elif in_origin == dict or out_origin == Dict:
+                    res = dict(map(__iter_func_dict, input_value.items()))
+                else:
+                    raise ValueError(
+                        f"Unsupported structural_type {input_type} to {out_type}"
+                    )
+                return cast(Out, res)
+
         raise ValueError(f"No converter registered for {input_type} to {out_type}")
 
     async def async_convert(
@@ -192,7 +237,7 @@ class TypeConverter:
         sub_class: bool = False,
         debug: bool = False,
     ) -> Out:
-        input_type = self._get_obj_type(input_value)
+        input_type = self._get_obj_type(input_value, full=True)
         all_converters = self.async_get_converter(
             input_type, out_type, sub_class, input_value
         )
@@ -206,7 +251,44 @@ class TypeConverter:
                     return await converter(input_value)
                 except Exception:
                     continue
+        if is_structural_type(input_type) and is_structural_type(out_type):
+            in_origin = get_origin(input_type)
+            out_origin = get_origin(out_type)
+            if in_origin == out_origin:
+                in_args = get_args(input_type)
+                out_args = get_args(out_type)
 
+                async def _iter_func(item):
+                    return await self.async_convert(
+                        item, out_args[0], sub_class=sub_class, debug=debug
+                    )
+
+                async def __iter_func_dict(item):
+                    k, v = item
+                    return await self.async_convert(
+                        k, out_args[0], sub_class=sub_class, debug=debug
+                    ), await self.async_convert(
+                        v, out_args[1], sub_class=sub_class, debug=debug
+                    )
+
+                if in_origin == list or out_origin == List:
+                    res = await asyncio.gather(*map(_iter_func, input_value))
+                elif in_origin == tuple or out_origin == Tuple:
+                    res = tuple(await asyncio.gather(*map(_iter_func, input_value)))
+                elif in_origin == set or out_origin == Set:
+                    res = set(await asyncio.gather(*map(_iter_func, input_value)))
+                elif out_origin in (Iterable, Iterator):
+                    res = await asyncio.gather(*map(_iter_func, input_value))
+                elif in_origin == dict or out_origin == Dict:
+                    items = await asyncio.gather(
+                        *map(__iter_func_dict, input_value.items())
+                    )
+                    res = dict(items)
+                else:
+                    raise ValueError(
+                        f"Unsupported structural_type {input_type} to {out_type}"
+                    )
+                return cast(Out, res)
         raise ValueError(f"No converter registered for {input_type} to {out_type}")
 
     def auto_convert(self, sub_class: bool = False):
@@ -326,7 +408,7 @@ class TypeVarModel:
 
 
 def gen_typevar_model(invar: Type[In]):
-    origin = get_origin(invar)
+    origin = get_real_origin(invar)
     args = get_args(invar)
     if origin is None and args == ():
         return TypeVarModel(origin=invar)

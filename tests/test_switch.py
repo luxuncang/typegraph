@@ -74,6 +74,18 @@ class TypeConverterTests(unittest.TestCase):
         self.assertEqual(result[0][0], [Test, str])
         self.assertEqual(result[0][1](10), "10")
 
+        # Test Structural
+        # result = list(self.converter.get_converter(list[int], list[float | str]))
+        # self.assertEqual(result[0][0], [int, str])
+        # self.assertEqual(result[0][1]([10]), ["10"])
+
+        # Test Nest Structural
+        # result = list(self.converter.get_converter(list[list[int]], list[list[float | str]]))
+        # print(result)
+        # self.assertEqual(result[0][0], [int, str])
+        # print(result[0][1]([[10]]))
+        # self.assertEqual(result[0][1]([[10]]), [["10"]])
+
     def test_convert(self):
         class Test(int): ...
 
@@ -86,14 +98,35 @@ class TypeConverterTests(unittest.TestCase):
         result = self.converter.convert("10", int)
         self.assertEqual(result, 10)
 
+        # Test Self -> Self
         result = self.converter.convert(10, int)
         self.assertEqual(result, 10)
 
+        # Test Union Type
         result = self.converter.convert(10, float | str)
         self.assertEqual(result, "10")
 
+        # Test Subclass
         result = self.converter.convert(Test(10), str, sub_class=True)
         self.assertEqual(result, "10")
+
+        # Test Structural
+        result = self.converter.convert([10], list[str])
+        self.assertEqual(result, ["10"])
+
+        # Test Nest Structural
+        result = self.converter.convert([[10, "10"]], list[list[float | str]])
+        self.assertEqual(result, [["10", "10"]])
+
+        # Test Dict Structural
+        result = self.converter.convert({"1": 1}, dict[int, str])
+        self.assertEqual(result, {1: "1"})
+
+        # Test Nest Dict Structural
+        result = self.converter.convert(
+            [[{"1": 1}]], list[list[dict[int, float | str]]]
+        )
+        self.assertEqual(result, [[{1: "1"}]])
 
     def test_async_get_converter(self):
         class Test(int): ...
@@ -158,14 +191,37 @@ class TypeConverterTests(unittest.TestCase):
             result = await self.converter.async_convert(10, str)
             self.assertEqual(result, "10")
 
+            # Test Self -> Self
             result = await self.converter.async_convert(10, int)
             self.assertEqual(result, 10)
 
+            # Test Union Type
             result = await self.converter.async_convert(10, float | str)
             self.assertEqual(result, "10")
 
+            # Test Subclass
             result = await self.converter.async_convert(Test(10), str, sub_class=True)
             self.assertEqual(result, "10")
+
+            # Test Structural
+            result = await self.converter.async_convert([10], list[str])
+            self.assertEqual(result, ["10"])
+
+            # Test Nest Structural
+            result = await self.converter.async_convert(
+                [[10, "10"]], list[list[float | str]]
+            )
+            self.assertEqual(result, [["10", "10"]])
+
+            # Test Dict Structural
+            result = await self.converter.async_convert({"1": 1}, dict[int, str])
+            self.assertEqual(result, {1: "1"})
+
+            # Test Nest Dict Structural
+            result = await self.converter.async_convert(
+                [[{"1": 1}]], list[list[dict[int, float | str]]]
+            )
+            self.assertEqual(result, [[{1: "1"}]])
 
         asyncio.run(test_async_conversion())
 
@@ -224,6 +280,14 @@ class TypeConverterTests(unittest.TestCase):
         def test_union(x: list | float):
             return x
 
+        @self.converter.auto_convert(sub_class=True)
+        def test_structural(x: list[str]):
+            return x
+
+        @self.converter.auto_convert(sub_class=True)
+        def test_next_structural(x: list[dict[str, int]]):
+            return x
+
         result = test_float_to_str("10")
         self.assertEqual(result, "10")
 
@@ -241,6 +305,12 @@ class TypeConverterTests(unittest.TestCase):
 
         result = test_switch(Test2(10))
         self.assertEqual(result, "10")
+
+        result = test_structural([1, 2, 3])
+        self.assertEqual(result, ["1", "2", "3"])
+
+        result = test_next_structural([{1, "1"}, {2, "2"}, {3, "3"}])
+        self.assertEqual(result, [{"1", 1}, {2, "2"}, {3, "3"}])
 
     def test_async_auto_convert(self):
         t = self.converter
@@ -297,6 +367,14 @@ class TypeConverterTests(unittest.TestCase):
         async def test_union(x: list | float):
             return x
 
+        @self.converter.async_auto_convert()
+        async def test_structural(x: list[str]):
+            return x
+
+        @self.converter.async_auto_convert()
+        async def test_next_structural(x: list[dict[str, int]]):
+            return x
+
         async def test_async_conversion():
             result = await test_float_to_str("10")
             self.assertEqual(result, "10")
@@ -315,6 +393,12 @@ class TypeConverterTests(unittest.TestCase):
 
             result = await test_switch(Test2(10))
             self.assertEqual(result, "10")
+
+            result = await test_structural([1, 2, 3])
+            self.assertEqual(result, ["1", "2", "3"])
+
+            result = await test_next_structural([{1, "1"}, {2, "2"}, {3, "3"}])
+            self.assertEqual(result, [{"1", 1}, {2, "2"}, {3, "3"}])
 
         asyncio.run(test_async_conversion())
 

@@ -8,7 +8,6 @@ authors = [
 dependencies = [
     "typing-inspect>=0.9.0",
     "networkx>=3.3",
-    "pytypes>=1.0b10",
 ]
 requires-python = ">=3.10"
 readme = "README.md"

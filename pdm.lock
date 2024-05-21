@@ -5,7 +5,7 @@
 groups = ["default"]
 strategy = ["cross_platform", "inherit_metadata"]
 lock_version = "4.4.1"
-content_hash = "sha256:047651cfb65cd6848eb428bccd99562dd8a8e157671fe9fce9bf773b4c8f34c1"
+content_hash = "sha256:478ec7cd2feae5809e7dc3bdbec2b9048dcef908e21e0219a62c3f69ae10be29"
 
 [[package]]
 name = "mypy-extensions"
@@ -27,16 +27,6 @@ groups = ["default"]
 files = [
     {file = "networkx-3.3-py3-none-any.whl", hash = "sha256:28575580c6ebdaf4505b22c6256a2b9de86b316dc63ba9e93abde3d78dfdbcf2"},
     {file = "networkx-3.3.tar.gz", hash = "sha256:0c127d8b2f4865f59ae9cb8aafcd60b5c70f3241ebd66f7defad7c4ab90126c9"},
-]
-
-[[package]]
-name = "pytypes"
-version = "1.0b10"
-summary = "Typing toolbox for Python 3 _and_ 2."
-groups = ["default"]
-files = [
-    {file = "pytypes-1.0b10-py2.py3-none-any.whl", hash = "sha256:3c7ad90429d3d9f19d48ca025159869e824bfcf3a278adb795d4d800ab541fbf"},
-    {file = "pytypes-1.0b10.tar.gz", hash = "sha256:f9264041c18d8b4779623bc9c10d978e2d2ab73d190fe028f978b3dfcc85256a"},
 ]
 
 [[package]]
