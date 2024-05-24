@@ -22,7 +22,7 @@ pip install typegraph3
 注册同步转换器并使用：
 
 ```python
-from typegraph3 import TypeConverter
+from typegraph import TypeConverter
 
 converter = TypeConverter()
 
@@ -39,7 +39,7 @@ print(result)
 
 ```python
 import asyncio
-from typegraph3 import TypeConverter
+from typegraph import TypeConverter
 
 converter = TypeConverter()
 
@@ -60,7 +60,7 @@ asyncio.run(test_async_conversion())
 #### 同步
 
 ```python
-from typegraph3 import TypeConverter
+from typegraph import TypeConverter
 
 converter = TypeConverter()
 
@@ -79,7 +79,7 @@ print(result)
 #### 异步
 
 ```python
-from typegraph3 import TypeConverter
+from typegraph import TypeConverter
 import asyncio
 
 converter = TypeConverter()
@@ -118,7 +118,7 @@ pytest test_switch.py
 您可以可视化类型转换图：
 
 ```python
-from typegraph3 import TypeConverter
+from typegraph import TypeConverter
 
 t = TypeConverter()
 
