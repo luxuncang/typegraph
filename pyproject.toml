@@ -1,6 +1,6 @@
 [project]
 name = "typegraph3"
-version = "0.0.1"
+version = "0.1.0"
 description = "Type Auto Switch"
 authors = [
     {name = "luxuncang", email = "luxuncang@qq.com"},
@@ -8,6 +8,7 @@ authors = [
 dependencies = [
     "typing-inspect>=0.9.0",
     "networkx>=3.3",
+    "typeguard>=4.3.0",
 ]
 requires-python = ">=3.10"
 readme = "README.md"

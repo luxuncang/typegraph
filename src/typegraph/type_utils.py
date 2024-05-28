@@ -53,7 +53,7 @@ def is_structural_type(tp):
 
 def deep_type(obj, depth: int = 10, max_sample: int = -1):
     if depth <= 0:
-        return Any
+        return get_generic_type(obj)
     if isinstance(obj, dict):
         keys = set()
         values = set()
@@ -86,14 +86,11 @@ def deep_type(obj, depth: int = 10, max_sample: int = -1):
         else:
             return list
     elif isinstance(obj, tuple):
-        args = set()
-        for i in obj[::max_sample]:
-            args.add(deep_type(i, depth - 1, max_sample))
-        if len(args) == 1:
+        args = []
+        for i in obj:
+            args.append(deep_type(i, depth - 1, max_sample))
+        if len(args) >= 1:
             return tuple[tuple(args)]  # type: ignore
-        elif len(args) > 1:
-            tpl = Union[tuple(args)]  # type: ignore
-            return tuple[tpl]  # type: ignore
         else:
             return tuple
     else:

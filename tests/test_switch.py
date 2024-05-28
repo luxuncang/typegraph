@@ -309,8 +309,8 @@ class TypeConverterTests(unittest.TestCase):
         result = test_structural([1, 2, 3])
         self.assertEqual(result, ["1", "2", "3"])
 
-        result = test_next_structural([{1, "1"}, {2, "2"}, {3, "3"}])
-        self.assertEqual(result, [{"1", 1}, {2, "2"}, {3, "3"}])
+        result = test_next_structural([{1: "1"}, {2: "2"}, {3: "3"}])
+        self.assertEqual(result, [{'1': 1}, {'2': 2}, {'3': 3}])
 
     def test_async_auto_convert(self):
         t = self.converter
@@ -397,8 +397,8 @@ class TypeConverterTests(unittest.TestCase):
             result = await test_structural([1, 2, 3])
             self.assertEqual(result, ["1", "2", "3"])
 
-            result = await test_next_structural([{1, "1"}, {2, "2"}, {3, "3"}])
-            self.assertEqual(result, [{"1", 1}, {2, "2"}, {3, "3"}])
+            result = await test_next_structural([{1: "1"}, {2: "2"}, {3: "3"}])
+            self.assertEqual(result, [{'1': 1}, {'2': 2}, {'3': 3}])
 
         asyncio.run(test_async_conversion())
 
