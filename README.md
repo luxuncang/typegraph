@@ -1,7 +1,7 @@
 # TypeGraph
 
 ## 概述
-**TypeGraph** 是一个 Python 库，用于在不同类型之间进行类型转换，包括自定义类型、内置类型和结构类型（如列表、集合和字典）。它支持同步和异步的转换方法。
+**TypeGraph** 是一个 Python 库，用于在不同类型之间进行类型转换，包括自定义类型、内置类型和结构类型 (如列表、集合和字典)。它支持同步和异步的转换方法。
 
 ## 功能
 - 注册同步和异步函数的类型转换器。
@@ -57,7 +57,7 @@ asyncio.run(test_async_conversion())
 ### 实例：协议类型
 
 ```python
-from typing import Protocol
+from typing import Protocol, TypedDict, runtime_checkable
 from dataclasses import dataclass
 
 from typegraph import TypeConverter
@@ -65,6 +65,14 @@ from typegraph import TypeConverter
 t = TypeConverter()
 
 class Person(Protocol):
+    name: str
+    phone: str
+    address: str
+
+    def get_name(self) -> str:
+        ...
+
+class PersonDict(TypedDict):
     name: str
     phone: str
     address: str
@@ -79,11 +87,22 @@ class A:
         self.phone = phone
         self.address = address
 
+    def get_name(self) -> str:
+        return self.name
+
 @dataclass
 class B:
     name: str
     phone: str
     address: str
+
+@t.register_converter(dict, PersonDict)
+def convert_dict_to_persondict(data: dict):
+    return PersonDict(
+        name=data["name"],
+        phone=data["phone"],
+        address=data["address"]
+    )
 
 @t.register_converter(Person, str)
 def convert_person_to_str(data: Person):
@@ -103,20 +122,33 @@ def test(a: str):
 
 d = {"name": "John", "phone": "123", "address": "123"}
 
-t.convert(d, A, debug=True)
 ```
+
+`t.show_mermaid_graph()`
 
 ```mermaid
 graph TD;
-Person-->str
+dict-->PersonDict
 dict-->A
 dict-->B
+Person-->str
+```
+
+`t.show_mermaid_graph(protocol=True)`
+
+```mermaid
+graph TD;
+dict-->PersonDict
+dict-->A
+dict-->B
+Person-->str
+A-.->Person
 ```
 
 ```bash
-Converting dict[str, str] to <class '__main__.A'> using [<class 'dict'>, <class '__main__.A'>], <function convert_dict_to_a at 0x7f66025cc040>
+Converting dict[str, str] to <class 'str'> using [<class 'dict'>, <class '__main__.A'>, <class '__main__.Person'>, <class 'str'>], <function TypeConverter.get_converter.<locals>.<lambda>.<locals>.<lambda> at 0x7fb9c8a948b0>
 
-<__main__.A at 0x7f6602841e10>
+'John 123 123'
 ```
 
 ### 自动转换装饰器
@@ -207,7 +239,7 @@ def B_to_float(input_value):
 async def float_to_str(input_value):
     return str(input_value)
 
-t.show_mermaid_graph()
+t.show_mermaid_graph(subclass=True)
 ```
 
 

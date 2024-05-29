@@ -28,20 +28,19 @@ from typing_inspect import is_union_type, is_typevar, get_generic_type
 from typeguard import check_type, TypeCheckError, CollectionCheckStrategy
 
 
-from .type_utils import get_origin as get_real_origin, is_structural_type, deep_type
+from .type_utils import (
+    get_origin as get_real_origin,
+    is_structural_type,
+    deep_type,
+    is_protocol_type,
+    check_protocol_type,
+)
 
 
 T = TypeVar("T")
 In = TypeVar("In", contravariant=True)
 Out = TypeVar("Out")
 P = ParamSpec("P")
-
-
-def get_all_subclasses(cls):
-    if hasattr(cls, "__subclasses__"):
-        for subclass in cls.__subclasses__():
-            yield subclass
-            yield from get_all_subclasses(subclass)
 
 
 def generate_type(generic: Type[Any], instance: List[Type[Any]]):
@@ -55,17 +54,54 @@ class TypeConverter:
 
     def __init__(self):
         self.G = nx.DiGraph()
-        self.vG = nx.DiGraph()
-        self.gG = nx.DiGraph()
+        self.sG = nx.DiGraph()
+        self.pG = nx.DiGraph()
+        self.pmG = nx.DiGraph()
         TypeConverter.instances.append(self)
+
+    def get_graph(self, sub_class: bool = False, protocol: bool = False):
+        if sub_class and protocol:
+            return nx.compose_all([self.G, self.sG, self.pG])
+        elif sub_class:
+            return nx.compose(self.G, self.sG)
+        elif protocol:
+            return nx.compose(self.G, self.pG)
+        return self.G
 
     def _gen_edge(
         self, in_type: Type[In], out_type: Type[Out], converter: Callable[P, Out]
     ):
         self.G.add_edge(in_type, out_type, converter=converter, line=True)
-        self.vG.add_edge(in_type, out_type, converter=converter, line=True)
-        for sub_in_type in get_all_subclasses(in_type):
-            self.vG.add_edge(sub_in_type, out_type, converter=converter, line=False)
+        for sub_in_type in self.get_subclass_types(in_type):
+            self.sG.add_edge(
+                sub_in_type,
+                out_type,
+                converter=converter,
+                line=False,
+                metadata={"sub_class": True},
+            )
+        if is_protocol_type(in_type):
+            self.pmG.add_node(in_type)
+        if is_protocol_type(out_type):
+            self.pmG.add_node(out_type)
+        for p_type in self.get_protocol_types(in_type):
+            self.pG.add_edge(
+                in_type,
+                p_type,
+                converter=lambda x: x,
+                line=False,
+                metadata={"protocol": True},
+            )
+        for p_type in self.get_protocol_types(out_type):
+            if out_type == str:
+                print(p_type, in_type, out_type, converter)
+            self.pG.add_edge(
+                out_type,
+                p_type,
+                converter=lambda x: x,
+                line=False,
+                metadata={"protocol": True},
+            )
 
     def register_converter(self, input_type: Type[In], out_type: Type[Out]):
         def decorator(func: Callable[P, T]) -> Callable[P, Out]:
@@ -82,59 +118,25 @@ class TypeConverter:
         return decorator
 
     def can_convert(
-        self, in_type: Type[In], out_type: Type[Out], full: bool = False
+        self, in_type: Type[In], out_type: Type[Out], sub_class=False, protocol=False
     ) -> bool:
         try:
-            if full:
-                nx.has_path(self.vG, in_type, out_type)
-            else:
-                nx.has_path(self.G, in_type, out_type)
+            nx.has_path(
+                self.get_graph(sub_class=sub_class, protocol=protocol),
+                in_type,
+                out_type,
+            )
             res = True
         except nx.NodeNotFound:
             res = False
         return res
 
-    def get_protocol_type(
-        self,
-        input_value,
-        sub_class: bool = False,
-    ):
-        nodes = set()
-
-        if sub_class:
-            for edge in self.vG.edges():
-                if edge[0] in nodes:
-                    continue
-                nodes.add(edge[0])
-                try:
-                    check_type(
-                        input_value,
-                        edge[0],
-                        collection_check_strategy=CollectionCheckStrategy.ALL_ITEMS,
-                    )
-                except TypeCheckError:
-                    continue
-                yield edge[0]
-        else:
-            for edge in self.G.edges():
-                if edge[0] in nodes:
-                    continue
-                nodes.add(edge[0])
-                try:
-                    check_type(
-                        input_value,
-                        edge[0],
-                        collection_check_strategy=CollectionCheckStrategy.ALL_ITEMS,
-                    )
-                except TypeCheckError:
-                    continue
-                yield edge[0]
-
     def get_converter(
         self,
         in_type: Type[In],
         out_type: Type[Out],
-        sub_class: bool = False,
+        sub_class=False,
+        protocol=False,
         input_value: Any = None,
     ):
         """
@@ -145,40 +147,41 @@ class TypeConverter:
         [ ] Generic type
         """
 
-        if self.can_convert(in_type, out_type, full=sub_class):
+        for path, converters in self.get_all_paths(
+            in_type, out_type, sub_class=sub_class, protocol=protocol
+        ):
+            func = reduce(lambda f, g: lambda x: g(f(x)), converters)
+            yield path, func
+        for p_type in self.get_protocol_types_by_value(
+            input_value, sub_class=sub_class, protocol=protocol
+        ):
             for path, converters in self.get_all_paths(
-                in_type, out_type, full=sub_class
+                p_type, out_type, sub_class=sub_class, protocol=protocol
             ):
                 func = reduce(lambda f, g: lambda x: g(f(x)), converters)
                 yield path, func
-        for p_type in self.get_protocol_type(input_value, sub_class=sub_class):
-            if self.can_convert(p_type, out_type, full=sub_class):
+        if is_union_type(out_type):
+            for out_type in get_args(out_type):
                 for path, converters in self.get_all_paths(
-                    p_type, out_type, full=sub_class
+                    in_type, out_type, sub_class=sub_class, protocol=protocol
                 ):
                     func = reduce(lambda f, g: lambda x: g(f(x)), converters)
                     yield path, func
-        if is_union_type(out_type):
-            for out_type in get_args(out_type):
-                if self.can_convert(in_type, out_type, full=sub_class):
+                for p_type in self.get_protocol_types_by_value(
+                    input_value, sub_class=sub_class, protocol=protocol
+                ):
                     for path, converters in self.get_all_paths(
-                        in_type, out_type, full=sub_class
+                        p_type, out_type, sub_class=sub_class, protocol=protocol
                     ):
                         func = reduce(lambda f, g: lambda x: g(f(x)), converters)
                         yield path, func
-                for p_type in self.get_protocol_type(input_value, sub_class=sub_class):
-                    if self.can_convert(p_type, out_type, full=sub_class):
-                        for path, converters in self.get_all_paths(
-                            p_type, out_type, full=sub_class
-                        ):
-                            func = reduce(lambda f, g: lambda x: g(f(x)), converters)
-                            yield path, func
 
     async def async_get_converter(
         self,
         in_type: Type[In],
         out_type: Type[Out],
         sub_class: bool = False,
+        protocol: bool = False,
         input_value=None,
     ):
         def async_wrapper(converters):
@@ -192,30 +195,30 @@ class TypeConverter:
 
             return async_converter
 
-        if self.can_convert(in_type, out_type, full=sub_class):
+        for path, converters in self.get_all_paths(
+            in_type, out_type, sub_class=sub_class, protocol=protocol
+        ):
+            yield path, async_wrapper(converters)
+        for p_type in self.get_protocol_types_by_value(
+            input_value, sub_class=sub_class, protocol=protocol
+        ):
             for path, converters in self.get_all_paths(
-                in_type, out_type, full=sub_class
+                p_type, out_type, sub_class=sub_class, protocol=protocol
             ):
                 yield path, async_wrapper(converters)
-        for p_type in self.get_protocol_type(input_value, sub_class=sub_class):
-            if self.can_convert(p_type, out_type, full=sub_class):
-                for path, converters in self.get_all_paths(
-                    p_type, out_type, full=sub_class
-                ):
-                    yield path, async_wrapper(converters)
         if is_union_type(out_type):
             for out_type in get_args(out_type):
-                if self.can_convert(in_type, out_type, full=sub_class):
+                for path, converters in self.get_all_paths(
+                    in_type, out_type, sub_class=sub_class, protocol=protocol
+                ):
+                    yield path, async_wrapper(converters)
+                for p_type in self.get_protocol_types_by_value(
+                    input_value, sub_class=sub_class
+                ):
                     for path, converters in self.get_all_paths(
-                        in_type, out_type, full=sub_class
+                        p_type, out_type, sub_class=sub_class, protocol=protocol
                     ):
                         yield path, async_wrapper(converters)
-                for p_type in self.get_protocol_type(input_value, sub_class=sub_class):
-                    if self.can_convert(p_type, out_type, full=sub_class):
-                        for path, converters in self.get_all_paths(
-                            p_type, out_type, full=sub_class
-                        ):
-                            yield path, async_wrapper(converters)
 
     def _apply_converters(self, input_value, converters):
         for converter in converters:
@@ -234,6 +237,7 @@ class TypeConverter:
         input_value,
         out_type: Type[Out],
         sub_class: bool = False,
+        protocol: bool = False,
         debug: bool = False,
     ) -> Out:
         input_type = self._get_obj_type(input_value, full=True)
@@ -241,8 +245,9 @@ class TypeConverter:
             all_converters = self.get_converter(
                 sub_input_type,  # type: ignore
                 out_type,
-                sub_class,
-                input_value,
+                sub_class=sub_class,
+                protocol=protocol,
+                input_value=input_value,
             )
             if all_converters is not None:
                 for path, converter in all_converters:
@@ -262,14 +267,28 @@ class TypeConverter:
 
                 def _iter_func(item):
                     return self.convert(
-                        item, out_args[0], sub_class=sub_class, debug=debug
+                        item,
+                        out_args[0],
+                        sub_class=sub_class,
+                        protocol=protocol,
+                        debug=debug,
                     )
 
                 def __iter_func_dict(item):
                     k, v = item
                     return self.convert(
-                        k, out_args[0], sub_class=sub_class, debug=debug
-                    ), self.convert(v, out_args[1], sub_class=sub_class, debug=debug)
+                        k,
+                        out_args[0],
+                        sub_class=sub_class,
+                        protocol=protocol,
+                        debug=debug,
+                    ), self.convert(
+                        v,
+                        out_args[1],
+                        sub_class=sub_class,
+                        protocol=protocol,
+                        debug=debug,
+                    )
 
                 if in_origin == list or out_origin == List:
                     res = list(map(_iter_func, input_value))
@@ -294,15 +313,17 @@ class TypeConverter:
         input_value,
         out_type: Type[Out],
         sub_class: bool = False,
+        protocol: bool = False,
         debug: bool = False,
     ) -> Out:
         input_type = self._get_obj_type(input_value, full=True)
         for sub_input_type in iter_deep_type(input_type):
             all_converters = self.async_get_converter(
-                sub_input_type, # type: ignore
+                sub_input_type,  # type: ignore
                 out_type,
-                sub_class,
-                input_value,
+                sub_class=sub_class,
+                protocol=protocol,
+                input_value=input_value,
             )
             if all_converters is not None:
                 async for path, converter in all_converters:
@@ -322,15 +343,27 @@ class TypeConverter:
 
                 async def _iter_func(item):
                     return await self.async_convert(
-                        item, out_args[0], sub_class=sub_class, debug=debug
+                        item,
+                        out_args[0],
+                        sub_class=sub_class,
+                        protocol=protocol,
+                        debug=debug,
                     )
 
                 async def __iter_func_dict(item):
                     k, v = item
                     return await self.async_convert(
-                        k, out_args[0], sub_class=sub_class, debug=debug
+                        k,
+                        out_args[0],
+                        sub_class=sub_class,
+                        protocol=protocol,
+                        debug=debug,
                     ), await self.async_convert(
-                        v, out_args[1], sub_class=sub_class, debug=debug
+                        v,
+                        out_args[1],
+                        sub_class=sub_class,
+                        protocol=protocol,
+                        debug=debug,
                     )
 
                 if in_origin == list or out_origin == List:
@@ -353,7 +386,12 @@ class TypeConverter:
                 return cast(Out, res)
         raise ValueError(f"No converter registered for {input_type} to {out_type}")
 
-    def auto_convert(self, sub_class: bool = False, ignore_error: bool = False):
+    def auto_convert(
+        self,
+        sub_class: bool = False,
+        protocol: bool = False,
+        ignore_error: bool = False,
+    ):
         def decorator(func: Callable[P, T]):
             sig = inspect.signature(func)
 
@@ -365,7 +403,10 @@ class TypeConverter:
                     if param.annotation is not inspect.Parameter.empty:
                         try:
                             bound.arguments[name] = self.convert(
-                                value, param.annotation, sub_class=sub_class
+                                value,
+                                param.annotation,
+                                sub_class=sub_class,
+                                protocol=protocol,
                             )
                         except Exception as e:
                             if ignore_error:
@@ -377,7 +418,12 @@ class TypeConverter:
 
         return decorator
 
-    def async_auto_convert(self, sub_class: bool = False, ignore_error: bool = False):
+    def async_auto_convert(
+        self,
+        sub_class: bool = False,
+        protocol: bool = False,
+        ignore_error: bool = False,
+    ):
         def decorator(func: Callable[P, Awaitable[T]]):
             sig = inspect.signature(func)
 
@@ -389,7 +435,10 @@ class TypeConverter:
                     if param.annotation is not inspect.Parameter.empty:
                         try:
                             bound.arguments[name] = await self.async_convert(
-                                value, param.annotation, sub_class=sub_class
+                                value,
+                                param.annotation,
+                                sub_class=sub_class,
+                                protocol=protocol,
                             )
                         except Exception as e:
                             if ignore_error:
@@ -401,19 +450,17 @@ class TypeConverter:
 
         return decorator
 
-    def get_edges(self, full: bool = False):
-        if not full:
-            for edge in self.G.edges(data=True):
-                yield edge
-        else:
-            for edge in self.vG.edges(data=True):
-                yield edge
+    def get_edges(self, sub_class: bool = False, protocol: bool = False):
+        for edge in self.get_graph(sub_class=sub_class, protocol=protocol).edges(
+            data=True
+        ):
+            yield edge
 
-    def show_mermaid_graph(self, full: bool = False):
+    def show_mermaid_graph(self, sub_class: bool = False, protocol: bool = False):
         from IPython.display import display, Markdown
 
         text = "```mermaid\ngraph TD;\n"
-        for edge in self.get_edges(full=full):
+        for edge in self.get_edges(sub_class=sub_class, protocol=protocol):
             line_style = "--" if edge[2]["line"] else "-.-"
             text += f"{edge[0].__name__}{line_style}>{edge[1].__name__}\n"
         text += "```"
@@ -421,13 +468,16 @@ class TypeConverter:
         display(Markdown(text))
         return text
 
-    def get_all_paths(self, in_type: Type[In], out_type: Type[Out], full: bool = False):
-        if full:
-            G = self.vG
-        else:
-            G = self.G
+    def get_all_paths(
+        self,
+        in_type: Type[In],
+        out_type: Type[Out],
+        sub_class: bool = False,
+        protocol: bool = False,
+    ):
+        G = self.get_graph(sub_class=sub_class, protocol=protocol)
 
-        if self.can_convert(in_type, out_type, full=full):
+        if self.can_convert(in_type, out_type, sub_class=sub_class, protocol=protocol):
             try:
                 for path in nx.shortest_simple_paths(G, in_type, out_type):
                     converters = [
@@ -440,6 +490,47 @@ class TypeConverter:
                         yield path, converters
             except nx.NetworkXNoPath:
                 ...
+
+    def get_subclass_types(self, cls: Type):
+        if hasattr(cls, "__subclasses__"):
+            for subclass in cls.__subclasses__():
+                yield subclass
+                yield from self.get_subclass_types(subclass)
+
+    def get_protocol_types(self, cls: Type, strict: bool = True):
+        nodes = set()
+        for node in list(self.pmG.nodes()):
+            if node in nodes:
+                continue
+            nodes.add(node)
+            try:
+                if not check_protocol_type(cls, node, strict=strict):
+                    continue
+            except TypeError:
+                continue
+            if cls != node:
+                yield node
+
+    def get_protocol_types_by_value(
+        self, input_value, sub_class: bool = False, protocol: bool = False
+    ):
+        nodes = set()
+        G = self.get_graph(sub_class=sub_class, protocol=protocol)
+
+        for edge in G.edges():
+            if edge[0] in nodes:
+                continue
+            nodes.add(edge[0])
+            try:
+                check_type(
+                    input_value,
+                    edge[0],
+                    collection_check_strategy=CollectionCheckStrategy.ALL_ITEMS,
+                )
+            except TypeCheckError:
+                continue
+            yield edge[0]
+
 
 @dataclass
 class TypeVarModel:

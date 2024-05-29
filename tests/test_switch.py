@@ -1,5 +1,7 @@
 import unittest
 import asyncio
+from typing import Protocol
+
 from typegraph.core import TypeConverter
 
 
@@ -40,7 +42,7 @@ class TypeConverterTests(unittest.TestCase):
         self.assertFalse(self.converter.can_convert(Test, int))
 
         self.assertFalse(self.converter.can_convert(Test, str))
-        self.assertTrue(self.converter.can_convert(Test, str, full=True))
+        self.assertTrue(self.converter.can_convert(Test, str, sub_class=True))
 
         self.assertFalse(self.converter.can_convert(str, float | int))
         self.assertFalse(self.converter.can_convert(int, float))
@@ -73,18 +75,6 @@ class TypeConverterTests(unittest.TestCase):
         result = list(self.converter.get_converter(Test, str, sub_class=True))
         self.assertEqual(result[0][0], [Test, str])
         self.assertEqual(result[0][1](10), "10")
-
-        # Test Structural
-        # result = list(self.converter.get_converter(list[int], list[float | str]))
-        # self.assertEqual(result[0][0], [int, str])
-        # self.assertEqual(result[0][1]([10]), ["10"])
-
-        # Test Nest Structural
-        # result = list(self.converter.get_converter(list[list[int]], list[list[float | str]]))
-        # print(result)
-        # self.assertEqual(result[0][0], [int, str])
-        # print(result[0][1]([[10]]))
-        # self.assertEqual(result[0][1]([[10]]), [["10"]])
 
     def test_convert(self):
         class Test(int): ...
@@ -312,6 +302,80 @@ class TypeConverterTests(unittest.TestCase):
         result = test_next_structural([{1: "1"}, {2: "2"}, {3: "3"}])
         self.assertEqual(result, [{'1': 1}, {'2': 2}, {'3': 3}])
 
+    def test_auto_convert_protocol(self):
+        from typing import Protocol, TypedDict
+        from dataclasses import dataclass
+
+        t = self.converter
+
+        class Person(Protocol):
+            name: str
+            phone: str
+            address: str
+
+            def get_name(self) -> str:
+                ...
+
+        class PersonDict(TypedDict):
+            name: str
+            phone: str
+            address: str
+
+        class A:
+            name: str
+            phone: str
+            address: str
+
+            def __init__(self, name: str, phone: str, address: str):
+                self.name = name
+                self.phone = phone
+                self.address = address
+
+            def get_name(self) -> str:
+                return self.name
+
+        @dataclass
+        class B:
+            name: str
+            phone: str
+            address: str
+
+        @t.register_converter(dict, PersonDict)
+        def convert_dict_to_persondict(data: dict):
+            return PersonDict(
+                name=data["name"],
+                phone=data["phone"],
+                address=data["address"]
+            )
+
+        @t.register_converter(Person, str)
+        def convert_person_to_str(data: Person):
+            return f"{data.name} {data.phone} {data.address}"
+
+        @t.register_converter(dict, A)
+        def convert_dict_to_a(data: dict):
+            return A(data["name"], data["phone"], data["address"])
+
+        @t.register_converter(dict, B)
+        def convert_dict_to_b(data: dict):
+            return B(data["name"], data["phone"], data["address"])
+        
+        @t.auto_convert(protocol=True)
+        def test(a: str):
+            return a
+        
+        @t.auto_convert(protocol=True)
+        def tests(a: list[str]):
+            return a
+
+        d = {"name": "John", "phone": "123", "address": "123"}
+
+        result = test(d)
+        self.assertEqual(result, "John 123 123")
+
+        result = tests([d])
+        self.assertEqual(result, ["John 123 123"])
+
     def test_async_auto_convert(self):
         t = self.converter
 
@@ -402,6 +466,82 @@ class TypeConverterTests(unittest.TestCase):
 
         asyncio.run(test_async_conversion())
 
+    def test_async_auto_convert_protocol(self):
+        from typing import Protocol, TypedDict
+        from dataclasses import dataclass
+
+        t = self.converter
+
+        class Person(Protocol):
+            name: str
+            phone: str
+            address: str
+
+            def get_name(self) -> str:
+                ...
+
+        class PersonDict(TypedDict):
+            name: str
+            phone: str
+            address: str
+
+        class A:
+            name: str
+            phone: str
+            address: str
+
+            def __init__(self, name: str, phone: str, address: str):
+                self.name = name
+                self.phone = phone
+                self.address = address
+
+            def get_name(self) -> str:
+                return self.name
+
+        @dataclass
+        class B:
+            name: str
+            phone: str
+            address: str
+
+        @t.register_converter(dict, PersonDict)
+        def convert_dict_to_persondict(data: dict):
+            return PersonDict(
+                name=data["name"],
+                phone=data["phone"],
+                address=data["address"]
+            )
+
+        @t.register_converter(Person, str)
+        def convert_person_to_str(data: Person):
+            return f"{data.name} {data.phone} {data.address}"
+
+        @t.register_converter(dict, A)
+        def convert_dict_to_a(data: dict):
+            return A(data["name"], data["phone"], data["address"])
+
+        @t.register_converter(dict, B)
+        def convert_dict_to_b(data: dict):
+            return B(data["name"], data["phone"], data["address"])
+        
+        @t.auto_convert(protocol=True)
+        async def test(a: str):
+            return a
+        
+        @t.auto_convert(protocol=True)
+        async def tests(a: list[str]):
+            return a
+
+        async def test_async_conversion_protocol():
+            d = {"name": "John", "phone": "123", "address": "123"}
+
+            result = await test(d)
+            self.assertEqual(result, "John 123 123")
+
+            result = await tests([d])
+            self.assertEqual(result, ["John 123 123"])
+
+        asyncio.run(test_async_conversion_protocol())
 
 if __name__ == "__main__":
     unittest.main()

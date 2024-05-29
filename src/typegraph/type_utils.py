@@ -2,7 +2,19 @@ import types
 import typing
 import inspect
 
-from typing import TypeVar, Generic, Union, Annotated, List, Dict, Callable, Any
+from typing import (
+    TypeVar,
+    Generic,
+    Union,
+    Annotated,
+    List,
+    Dict,
+    Callable,
+    Any,
+    runtime_checkable,
+    Protocol,
+    Type,
+)
 from typing_extensions import get_type_hints
 from typing_inspect import is_generic_type, get_generic_type
 
@@ -51,6 +63,10 @@ def is_structural_type(tp):
     return False
 
 
+def is_protocol_type(tp):
+    return hasattr(tp, "_is_protocol") and tp._is_protocol
+
+
 def deep_type(obj, depth: int = 10, max_sample: int = -1):
     if depth <= 0:
         return get_generic_type(obj)
@@ -95,3 +111,35 @@ def deep_type(obj, depth: int = 10, max_sample: int = -1):
             return tuple
     else:
         return get_generic_type(obj)
+
+
+def attribute_check(tp, etp):
+    htp = get_type_hints(tp, include_extras=True)
+    hetp = get_type_hints(etp, include_extras=True)
+    for key in hetp:
+        if key not in htp:
+            return False
+        if hetp[key] != htp[key]:
+            return False
+    return True
+
+
+def method_check(tp, etp):
+    dhp = tp.__dict__
+    dehp = etp.__dict__
+    for key in dehp:
+        if key.startswith("__") or key.startswith("_"):
+            continue
+        if key not in dhp:
+            return False
+        if not attribute_check(dhp[key], dehp[key]):
+            return False
+    return True
+
+
+def check_protocol_type(tp, expected_type, *, strict: bool = True):
+    if not is_protocol_type(expected_type):
+        raise TypeError(f"{expected_type} is not a protocol type")
+    if strict:
+        return attribute_check(tp, expected_type) and method_check(tp, expected_type)
+    return issubclass(tp, runtime_checkable(expected_type))
