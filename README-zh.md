@@ -2,7 +2,7 @@
 
 # TypeGraph
 
-_**TypeGraph** is a Python library designed for type conversion between various types, including custom types, built-in types, and structural types (such as lists, sets, and dictionaries). It supports both synchronous and asynchronous conversion methods._
+_**TypeGraph** 是一个 Python 库，用于在不同类型之间进行类型转换，包括自定义类型、内置类型和结构类型 (如列表、集合和字典)。它支持同步和异步的转换方法。_
 
 > 人间总有一两风，填我十万八千梦
 
@@ -10,18 +10,18 @@ _**TypeGraph** is a Python library designed for type conversion between various 
  [![GitHub](https://img.shields.io/github/license/luxuncang/typegraph)](https://github.com/luxuncang/typegraph/blob/master/LICENSE)
  [![CodeQL](https://github.com/luxuncang/typegraph/workflows/CodeQL/badge.svg)](https://github.com/luxuncang/typegraph/blob/master/.github/workflows/codeql.yml)
 
-English | [简体中文](./README-zh.md)
+简体中文 | [English](./README.md)
 
 </div>
 
-## Features
-- Register type converters for synchronous and asynchronous functions.
-- Automatically convert function arguments based on type annotations.
-- Support for subclass, union types, and structural types conversion.
-- Visualize the conversion graph using mermaid syntax.
+## 功能
+- 注册同步和异步函数的类型转换器。
+- 根据类型注解自动转换函数参数。
+- 支持子类、联合类型和结构类型的转换。
+- 使用 mermaid 语法可视化转换图。
 
-## Installation
-Install the required dependencies with the following command:
+## 安装
+使用以下命令安装运行该库所需的依赖项：
 
 ```sh
 pip install typegraph3
@@ -33,10 +33,10 @@ Or
 pdm add typegraph3
 ```
 
-## Getting Started
+## 入门指南
 
-### Example: Synchronous Converter
-Register and use a synchronous converter:
+### 示例：同步转换器
+注册同步转换器并使用：
 
 ```python
 from typegraph import TypeConverter
@@ -51,8 +51,8 @@ result = converter.convert(10, str)  # "10"
 print(result)
 ```
 
-### Example: Asynchronous Converter
-Register and use an asynchronous converter:
+### 示例：异步转换器
+注册异步转换器并使用：
 
 ```python
 import asyncio
@@ -71,7 +71,7 @@ async def test_async_conversion():
 asyncio.run(test_async_conversion())
 ```
 
-### Example: Protocol Types
+### 实例：协议类型
 
 ```python
 from typing import Protocol, TypedDict, runtime_checkable
@@ -168,10 +168,10 @@ Converting dict[str, str] to <class 'str'> using [<class 'dict'>, <class '__main
 'John 123 123'
 ```
 
-### Auto-Convert Decorator
-Automatically convert function arguments based on type annotations:
+### 自动转换装饰器
+根据类型注解自动转换函数参数：
 
-#### Synchronous
+#### 同步
 
 ```python
 from typegraph import TypeConverter
@@ -190,7 +190,7 @@ result = add_one("10")  # 11
 print(result)
 ```
 
-#### Asynchronous
+#### 异步
 
 ```python
 from typegraph import TypeConverter
@@ -213,23 +213,23 @@ async def test_async():
 asyncio.run(test_async())
 ```
 
-## Testing
+## 测试
 
-Unit tests are provided to ensure the library functions correctly. Run the tests:
+提供了单元测试，以确保库的正确功能。运行测试：
 
 ```bash
 pytest test_switch.py
 ```
 
-Tests cover:
-- Registration and execution of synchronous converters.
-- Registration and execution of asynchronous converters.
-- Conversion capability checks.
-- Automatic conversion of function arguments (both synchronous and asynchronous).
+测试覆盖了：
+- 同步转换器的注册与执行。
+- 异步转换器的注册与执行。
+- 转换能力检查。
+- 函数参数的自动转换（同步和异步）。
 
-## Visualization
+## 可视化
 
-You can visualize the type conversion graph:
+您可以可视化类型转换图：
 
 ```python
 from typegraph import TypeConverter
@@ -259,6 +259,7 @@ async def float_to_str(input_value):
 t.show_mermaid_graph(subclass=True)
 ```
 
+
 ```mermaid
 graph TD;
 float-->Test
@@ -267,23 +268,23 @@ Test-->float
 TestFloat-.->float
 ```
 
-The graph will be displayed using mermaid syntax, which can be rendered online or in supported environments like Jupyter Notebooks.
+图将使用 mermaid 语法显示，您可以在线渲染或在支持的环境中（如 Jupyter Notebooks）进行渲染。
 
-## Supported Types
+## 支持的类型
 
-- [X] Subclass type
-- [X] Union type
-- [X] Annotated type
-- [X] Structural type
-- [X] Protocol type (input types only)
-- [X] TypedDict type
-- [ ] Generic type
+- [X] 子类类型 (SubClass type)
+- [X] 联合类型 (Union type)
+- [X] 注解类型 (Annotated type)
+- [X] 结构类型 (Structural type)
+- [X] 协议类型 (Protocol type) (只支持输入类型)
+- [X] 字典类型 (TypedDict type)
+- [ ] 泛型类型 (Generic type)
 
-## License
-This project is licensed under the MIT License.
+## 许可
+此项目使用 MIT 许可证。
 
-## Contributing
-Contributions are welcome! Please open an issue or submit a pull request for any changes.
+## 贡献
+欢迎贡献！请提出 issue 或提交 pull request 来进行更改。
 
-## Contact
-If you have any questions or concerns, please open an issue in this repository.
+## 联系方式
+如果您有任何问题或疑问，请在此仓库中提出 issue。

@@ -258,7 +258,7 @@ class TypeConverter:
                             )
                         return converter(input_value)
                     except Exception:
-                        continue
+                        ...
         if is_structural_type(input_type) and is_structural_type(out_type):
             in_origin = get_origin(input_type)
             out_origin = get_origin(out_type)
@@ -334,7 +334,7 @@ class TypeConverter:
                             )
                         return await converter(input_value)
                     except Exception:
-                        continue
+                        ...
         if is_structural_type(input_type) and is_structural_type(out_type):
             in_origin = get_origin(input_type)
             out_origin = get_origin(out_type)
