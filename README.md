@@ -139,6 +139,7 @@ def test(a: str):
 
 d = {"name": "John", "phone": "123", "address": "123"}
 
+t.convert([d], list[str], debug=True, protocol=True)
 ```
 
 `t.show_mermaid_graph()`
@@ -163,9 +164,9 @@ A-.->Person
 ```
 
 ```bash
-Converting dict[str, str] to <class 'str'> using [<class 'dict'>, <class '__main__.A'>, <class '__main__.Person'>, <class 'str'>], <function TypeConverter.get_converter.<locals>.<lambda>.<locals>.<lambda> at 0x7fb9c8a948b0>
+Converting dict[str, str] to <class 'str'> using [<class 'dict'>, <class '__main__.A'>, <class '__main__.Person'>, <class 'str'>], <function TypeConverter.get_converter.<locals>.<lambda>.<locals>.<lambda> at 0x7f1f3306fac0>
 
-'John 123 123'
+['John 123 123']
 ```
 
 ### Auto-Convert Decorator
