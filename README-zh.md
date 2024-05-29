@@ -4,7 +4,7 @@
 
 _**TypeGraph** 是一个 Python 库，用于在不同类型之间进行类型转换，包括自定义类型、内置类型和结构类型 (如列表、集合和字典)。它支持同步和异步的转换方法。_
 
-> 人间总有一两风，填我十万八千梦
+> 蓦然回首，那人却在灯火阑珊处
 
  [![CodeFactor](https://www.codefactor.io/repository/github/luxuncang/typegraph/badge)](https://www.codefactor.io/repository/github/luxuncang/typegraph)
  [![GitHub](https://img.shields.io/github/license/luxuncang/typegraph)](https://github.com/luxuncang/typegraph/blob/master/LICENSE)
