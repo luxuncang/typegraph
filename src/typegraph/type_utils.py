@@ -1,22 +1,16 @@
 import types
 import typing
-import inspect
 
 from typing import (
-    TypeVar,
-    Generic,
     Union,
-    Annotated,
     List,
-    Dict,
     Callable,
     Any,
     runtime_checkable,
-    Protocol,
     Type,
 )
 from typing_extensions import get_type_hints
-from typing_inspect import is_generic_type, get_generic_type
+from typing_inspect import get_generic_type
 
 
 def get_origin(tp):
@@ -43,7 +37,7 @@ def get_origin(tp):
     if isinstance(
         tp,
         (
-            typing._BaseGenericAlias,
+            typing._BaseGenericAlias, # type: ignore
             typing.GenericAlias,  # type: ignore
             typing.ParamSpecArgs,
             typing.ParamSpecKwargs,
@@ -143,3 +137,22 @@ def check_protocol_type(tp, expected_type, *, strict: bool = True):
     if strict:
         return attribute_check(tp, expected_type) and method_check(tp, expected_type)
     return issubclass(tp, runtime_checkable(expected_type))
+
+
+def generate_type(generic: Type[Any], instance: List[Type[Any]]):
+    if types.UnionType == generic:
+        return Union[tuple(instance)]  # type: ignore
+    elif Callable == generic:
+        if len(instance) == 2:
+            return generic[instance[0], instance[1]]
+        return generic
+    elif len(instance) == 0:
+        return generic
+    return generic[tuple(instance)]
+
+
+def get_subclass_types(cls: Type):
+    if hasattr(cls, "__subclasses__"):
+        for subclass in cls.__subclasses__():
+            yield subclass
+            yield from get_subclass_types(subclass)

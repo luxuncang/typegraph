@@ -278,7 +278,7 @@ The graph will be displayed using mermaid syntax, which can be rendered online o
 - [X] Structural type
 - [X] Protocol type (input types only)
 - [X] TypedDict type
-- [ ] Generic type
+- [X] Generic type
 
 ## License
 This project is licensed under the MIT License.

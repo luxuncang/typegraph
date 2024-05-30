@@ -1,6 +1,5 @@
 import inspect
 import asyncio
-import types
 from typing import (
     TypeVar,
     ParamSpec,
@@ -16,24 +15,23 @@ from typing import (
     Awaitable,
     Any,
     Optional,
-    Union,
+    get_type_hints,
+    Generic,
 )
 from functools import wraps, reduce
-from dataclasses import dataclass
-from collections import deque
 
 import networkx as nx
 from typing_extensions import get_args, get_origin
-from typing_inspect import is_union_type, is_typevar, get_generic_type
+from typing_inspect import is_union_type, get_generic_type
 from typeguard import check_type, TypeCheckError, CollectionCheckStrategy
 
-
-from .type_utils import (
-    get_origin as get_real_origin,
+from .typevar import iter_deep_type, gen_typevar_model, extract_typevar_mapping
+from ..type_utils import (
     is_structural_type,
     deep_type,
     is_protocol_type,
     check_protocol_type,
+    get_subclass_types,
 )
 
 
@@ -43,12 +41,6 @@ Out = TypeVar("Out")
 P = ParamSpec("P")
 
 
-def generate_type(generic: Type[Any], instance: List[Type[Any]]):
-    if types.UnionType == generic:
-        return Union[tuple(instance)]  # type: ignore
-    return generic[tuple(instance)]
-
-
 class TypeConverter:
     instances: List["TypeConverter"] = []
 
@@ -56,16 +48,27 @@ class TypeConverter:
         self.G = nx.DiGraph()
         self.sG = nx.DiGraph()
         self.pG = nx.DiGraph()
+        self.tG = nx.DiGraph()
         self.pmG = nx.DiGraph()
         TypeConverter.instances.append(self)
 
-    def get_graph(self, sub_class: bool = False, protocol: bool = False):
-        if sub_class and protocol:
-            return nx.compose_all([self.G, self.sG, self.pG])
-        elif sub_class:
-            return nx.compose(self.G, self.sG)
-        elif protocol:
-            return nx.compose(self.G, self.pG)
+    def get_graph(
+        self,
+        sub_class: bool = False,
+        protocol: bool = False,
+        combos: Optional[list[nx.DiGraph]] = None,
+    ):
+        base_graphs = [self.G]
+        if sub_class:
+            base_graphs.append(self.sG)
+        if protocol:
+            base_graphs.append(self.pG)
+
+        if combos:
+            base_graphs.extend(combos)
+
+        if len(base_graphs) > 1:
+            return nx.compose_all(base_graphs)
         return self.G
 
     def _gen_edge(
@@ -103,6 +106,31 @@ class TypeConverter:
                 metadata={"protocol": True},
             )
 
+    def _gen_graph(self, in_type: Type[In], out_type: Type[Out]):
+        tmp_G = nx.DiGraph()
+        im = gen_typevar_model(in_type)
+        om = gen_typevar_model(out_type)
+        for u, v, c in self.tG.edges(data=True):
+            um = gen_typevar_model(u)
+            vm = gen_typevar_model(v)
+            combos = [(um, im), (vm, im), (um, om), (vm, om)]
+            for t, i in combos:
+                try:
+                    mapping = extract_typevar_mapping(t, i)
+                    tmp_G.add_edge(
+                        um.get_instance(mapping), vm.get_instance(mapping), **c
+                    )
+                except Exception:
+                    ...
+        return tmp_G
+
+    def register_generic_converter(self, input_type: Type, out_type: Type):
+        def decorator(func: Callable[P, T]):
+            self.tG.add_edge(input_type, out_type, converter=func)
+            return func
+
+        return decorator
+
     def register_converter(self, input_type: Type[In], out_type: Type[Out]):
         def decorator(func: Callable[P, T]) -> Callable[P, Out]:
             self._gen_edge(input_type, out_type, func)
@@ -118,11 +146,16 @@ class TypeConverter:
         return decorator
 
     def can_convert(
-        self, in_type: Type[In], out_type: Type[Out], sub_class=False, protocol=False
+        self,
+        in_type: Type[In],
+        out_type: Type[Out],
+        sub_class=False,
+        protocol=False,
+        combos: Optional[list[nx.DiGraph]] = None,
     ) -> bool:
         try:
             nx.has_path(
-                self.get_graph(sub_class=sub_class, protocol=protocol),
+                self.get_graph(sub_class=sub_class, protocol=protocol, combos=combos),
                 in_type,
                 out_type,
             )
@@ -152,14 +185,6 @@ class TypeConverter:
         ):
             func = reduce(lambda f, g: lambda x: g(f(x)), converters)
             yield path, func
-        for p_type in self.get_protocol_types_by_value(
-            input_value, sub_class=sub_class, protocol=protocol
-        ):
-            for path, converters in self.get_all_paths(
-                p_type, out_type, sub_class=sub_class, protocol=protocol
-            ):
-                func = reduce(lambda f, g: lambda x: g(f(x)), converters)
-                yield path, func
         if is_union_type(out_type):
             for out_type in get_args(out_type):
                 for path, converters in self.get_all_paths(
@@ -167,7 +192,7 @@ class TypeConverter:
                 ):
                     func = reduce(lambda f, g: lambda x: g(f(x)), converters)
                     yield path, func
-                for p_type in self.get_protocol_types_by_value(
+                for p_type in self.get_check_types_by_value(
                     input_value, sub_class=sub_class, protocol=protocol
                 ):
                     for path, converters in self.get_all_paths(
@@ -175,6 +200,14 @@ class TypeConverter:
                     ):
                         func = reduce(lambda f, g: lambda x: g(f(x)), converters)
                         yield path, func
+        for p_type in self.get_check_types_by_value(
+            input_value, sub_class=sub_class, protocol=protocol
+        ):
+            for path, converters in self.get_all_paths(
+                p_type, out_type, sub_class=sub_class, protocol=protocol
+            ):
+                func = reduce(lambda f, g: lambda x: g(f(x)), converters)
+                yield path, func
 
     async def async_get_converter(
         self,
@@ -199,7 +232,7 @@ class TypeConverter:
             in_type, out_type, sub_class=sub_class, protocol=protocol
         ):
             yield path, async_wrapper(converters)
-        for p_type in self.get_protocol_types_by_value(
+        for p_type in self.get_check_types_by_value(
             input_value, sub_class=sub_class, protocol=protocol
         ):
             for path, converters in self.get_all_paths(
@@ -212,7 +245,7 @@ class TypeConverter:
                     in_type, out_type, sub_class=sub_class, protocol=protocol
                 ):
                     yield path, async_wrapper(converters)
-                for p_type in self.get_protocol_types_by_value(
+                for p_type in self.get_check_types_by_value(
                     input_value, sub_class=sub_class
                 ):
                     for path, converters in self.get_all_paths(
@@ -391,20 +424,24 @@ class TypeConverter:
         sub_class: bool = False,
         protocol: bool = False,
         ignore_error: bool = False,
+        globalns: dict[str, Any] | None = None,
+        localns: dict[str, Any] | None = None,
     ):
         def decorator(func: Callable[P, T]):
             sig = inspect.signature(func)
+            hints = get_type_hints(
+                func, include_extras=True, globalns=globalns, localns=localns
+            )
 
             @wraps(func)
             def wrapper(*args, **kwargs) -> T:
                 bound = sig.bind(*args, **kwargs)
                 for name, value in bound.arguments.items():
-                    param = sig.parameters[name]
-                    if param.annotation is not inspect.Parameter.empty:
+                    if name in hints:
                         try:
                             bound.arguments[name] = self.convert(
                                 value,
-                                param.annotation,
+                                hints[name],
                                 sub_class=sub_class,
                                 protocol=protocol,
                             )
@@ -423,20 +460,24 @@ class TypeConverter:
         sub_class: bool = False,
         protocol: bool = False,
         ignore_error: bool = False,
+        globalns: dict[str, Any] | None = None,
+        localns: dict[str, Any] | None = None,
     ):
         def decorator(func: Callable[P, Awaitable[T]]):
             sig = inspect.signature(func)
+            hints = get_type_hints(
+                func, include_extras=True, globalns=globalns, localns=localns
+            )
 
             @wraps(func)
             async def wrapper(*args, **kwargs) -> T:
                 bound = sig.bind(*args, **kwargs)
                 for name, value in bound.arguments.items():
-                    param = sig.parameters[name]
-                    if param.annotation is not inspect.Parameter.empty:
+                    if name in hints:
                         try:
                             bound.arguments[name] = await self.async_convert(
                                 value,
-                                param.annotation,
+                                hints[name],
                                 sub_class=sub_class,
                                 protocol=protocol,
                             )
@@ -475,9 +516,17 @@ class TypeConverter:
         sub_class: bool = False,
         protocol: bool = False,
     ):
-        G = self.get_graph(sub_class=sub_class, protocol=protocol)
-
-        if self.can_convert(in_type, out_type, sub_class=sub_class, protocol=protocol):
+        G = self.get_graph(
+            sub_class=sub_class,
+            protocol=protocol,
+            combos=[self._gen_graph(in_type, out_type)],
+        )
+        try:
+            nx.has_path(G, in_type, out_type)
+            res = True
+        except nx.NodeNotFound:
+            res = False
+        if res:
             try:
                 for path in nx.shortest_simple_paths(G, in_type, out_type):
                     converters = [
@@ -492,10 +541,7 @@ class TypeConverter:
                 ...
 
     def get_subclass_types(self, cls: Type):
-        if hasattr(cls, "__subclasses__"):
-            for subclass in cls.__subclasses__():
-                yield subclass
-                yield from self.get_subclass_types(subclass)
+        yield from get_subclass_types(cls)
 
     def get_protocol_types(self, cls: Type, strict: bool = True):
         nodes = set()
@@ -511,7 +557,7 @@ class TypeConverter:
             if cls != node:
                 yield node
 
-    def get_protocol_types_by_value(
+    def get_check_types_by_value(
         self, input_value, sub_class: bool = False, protocol: bool = False
     ):
         nodes = set()
@@ -527,144 +573,6 @@ class TypeConverter:
                     edge[0],
                     collection_check_strategy=CollectionCheckStrategy.ALL_ITEMS,
                 )
-            except TypeCheckError:
+            except Exception:
                 continue
             yield edge[0]
-
-
-@dataclass
-class TypeVarModel:
-    origin: Any
-    args: Optional[List["TypeVarModel" | List["TypeVarModel"]]] = None
-
-    def to_dict(self):
-        return {
-            "origin": self.origin,
-            "args": [
-                arg.to_dict() if isinstance(arg, TypeVarModel) else arg
-                for arg in self.args
-            ]
-            if self.args is not None
-            else self.args,
-        }
-
-    def get_instance(self, instance: Optional[dict[Type[TypeVar], Type]] = None):
-        generic = self.origin
-        args_list = []
-        if instance is None:
-            instance = {}
-        if self.args is None or not self.args:
-            if is_typevar(generic):
-                return instance.get(generic, generic)
-            return generic
-
-        for arg in self.args:
-            if isinstance(arg, TypeVarModel):
-                args_list.append(arg.get_instance(instance))
-            elif isinstance(arg, list):
-                args_list.append([a.get_instance(instance) for a in arg])
-            else:
-                raise ValueError("Invalid TypeVarModel")
-        return generate_type(generic, args_list)
-
-    def depth_first_traversal(self, parent=None, parent_arg_index=None, depth=1):
-        if self.args:
-            for i, arg in enumerate(self.args):
-                if isinstance(arg, TypeVarModel):
-                    yield from arg.depth_first_traversal(self, i, depth + 1)
-                elif isinstance(arg, list):
-                    for j, a in enumerate(arg):
-                        if isinstance(a, TypeVarModel):
-                            yield from a.depth_first_traversal(self, (i, j), depth + 1)
-            yield self, parent, parent_arg_index, depth
-        else:
-            yield self, parent, parent_arg_index, depth
-
-    def remove_deepest_level_node(self):
-        max_depth = self.get_max_depth()
-        deepest_nodes_info = []
-
-        for node, parent, parent_arg_index, depth in self.depth_first_traversal():
-            if depth == max_depth:
-                deepest_nodes_info.append((node, parent, parent_arg_index))
-
-        for _, parent, parent_arg_index in reversed(deepest_nodes_info):
-            if isinstance(parent_arg_index, tuple):
-                list_index, item_index = parent_arg_index
-                if list_index < len(parent.args) and item_index < len(
-                    parent.args[list_index]
-                ):
-                    parent.args[list_index].pop(item_index)
-            else:
-                if parent_arg_index < len(parent.args):
-                    parent.args.pop(parent_arg_index)
-
-    def level_order_traversal(self):
-        current_level = deque([self])
-        next_level = deque()
-        while current_level:
-            level_nodes = []
-            while current_level:
-                node = current_level.popleft()
-                level_nodes.append(node.origin)
-                if node.args:
-                    for arg in node.args:
-                        if isinstance(arg, TypeVarModel):
-                            next_level.append(arg)
-                        elif isinstance(arg, list):
-                            for a in arg:
-                                if isinstance(a, TypeVarModel):
-                                    next_level.append(a)
-            yield level_nodes
-            current_level, next_level = next_level, deque()
-
-    def get_max_depth(self):
-        max_depth = 0
-
-        def dfs(node, depth):
-            nonlocal max_depth
-            if isinstance(node, TypeVarModel):
-                max_depth = max(max_depth, depth)
-                if node.args:
-                    for arg in node.args:
-                        if isinstance(arg, TypeVarModel):
-                            dfs(arg, depth + 1)
-                        elif isinstance(arg, list):
-                            for a in arg:
-                                if isinstance(a, TypeVarModel):
-                                    dfs(a, depth + 1)
-
-        dfs(self, 1)
-        return max_depth
-
-    def __str__(self):
-        return f"{self.__class__.__name__}({self.get_instance()})"
-
-
-def gen_typevar_model(invar: Type[In]):
-    origin = get_real_origin(invar)
-    args = get_args(invar)
-    if origin is None and args == ():
-        return TypeVarModel(origin=invar)
-    args_list = []
-    for arg in args:
-        if isinstance(arg, list):
-            args_list.append([gen_typevar_model(a) for a in arg])
-        else:
-            args_list.append(gen_typevar_model(arg))
-    obj = TypeVarModel(origin=origin, args=args_list)
-    return obj
-
-
-def iter_deep_type(invar: Type[In]):
-    obj = gen_typevar_model(invar)
-    max_depth = obj.get_max_depth()
-    yield obj.get_instance()
-    for _ in reversed(range(1, max_depth)):
-        obj.remove_deepest_level_node()
-        yield obj.get_instance()
-
-
-def infer_generic_type(type_var: Type[Any], instance: dict[Type[TypeVar], Type]):
-    model = gen_typevar_model(type_var)
-    return model.get_instance(instance)

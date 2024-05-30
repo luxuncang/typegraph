@@ -1,8 +1,13 @@
+from __future__ import annotations
+
 import unittest
 import asyncio
-from typing import Protocol
+from typing import TypeVar
 
-from typegraph.core import TypeConverter
+from typegraph.converter.base import TypeConverter
+
+K = TypeVar("K")
+V = TypeVar("V")
 
 
 class TypeConverterTests(unittest.TestCase):
@@ -224,6 +229,10 @@ class TypeConverterTests(unittest.TestCase):
 
         class Test2(int): ...
 
+        class Test3: ...
+
+        class Test4: ...
+
         @t.register_converter(str, int)
         def str_to_int(input_value):
             return int(input_value)
@@ -254,7 +263,11 @@ class TypeConverterTests(unittest.TestCase):
         def str_to_float(input_value):
             return float(input_value)
 
-        @self.converter.auto_convert()
+        @self.converter.async_register_converter(dict[K,V], dict[V,K])
+        async def reverse_dict(d: dict[K,V]) -> dict[V,K]:
+            return {v: k for k, v in d.items()}
+
+        @self.converter.auto_convert(localns=locals())
         def test_float_to_str(x: Test):
             return x.t
 
@@ -274,8 +287,12 @@ class TypeConverterTests(unittest.TestCase):
         def test_structural(x: list[str]):
             return x
 
-        @self.converter.auto_convert(sub_class=True)
+        @self.converter.auto_convert()
         def test_next_structural(x: list[dict[str, int]]):
+            return x
+
+        @self.converter.auto_convert()
+        def test_structural_dict(x: list[dict[str, int]]):
             return x
 
         result = test_float_to_str("10")
@@ -302,6 +319,7 @@ class TypeConverterTests(unittest.TestCase):
         result = test_next_structural([{1: "1"}, {2: "2"}, {3: "3"}])
         self.assertEqual(result, [{'1': 1}, {'2': 2}, {'3': 3}])
 
+
     def test_auto_convert_protocol(self):
         from typing import Protocol, TypedDict
         from dataclasses import dataclass
@@ -313,8 +331,7 @@ class TypeConverterTests(unittest.TestCase):
             phone: str
             address: str
 
-            def get_name(self) -> str:
-                ...
+            def get_name(self) -> str: ...
 
         class PersonDict(TypedDict):
             name: str
@@ -343,9 +360,7 @@ class TypeConverterTests(unittest.TestCase):
         @t.register_converter(dict, PersonDict)
         def convert_dict_to_persondict(data: dict):
             return PersonDict(
-                name=data["name"],
-                phone=data["phone"],
-                address=data["address"]
+                name=data["name"], phone=data["phone"], address=data["address"]
             )
 
         @t.register_converter(Person, str)
@@ -359,11 +374,11 @@ class TypeConverterTests(unittest.TestCase):
         @t.register_converter(dict, B)
         def convert_dict_to_b(data: dict):
             return B(data["name"], data["phone"], data["address"])
-        
+
         @t.auto_convert(protocol=True)
         def test(a: str):
             return a
-        
+
         @t.auto_convert(protocol=True)
         def tests(a: list[str]):
             return a
@@ -415,7 +430,7 @@ class TypeConverterTests(unittest.TestCase):
         def str_to_float(input_value):
             return float(input_value)
 
-        @self.converter.async_auto_convert()
+        @self.converter.async_auto_convert(localns=locals())
         async def test_float_to_str(x: Test):
             return x.t
 
@@ -462,7 +477,7 @@ class TypeConverterTests(unittest.TestCase):
             self.assertEqual(result, ["1", "2", "3"])
 
             result = await test_next_structural([{1: "1"}, {2: "2"}, {3: "3"}])
-            self.assertEqual(result, [{'1': 1}, {'2': 2}, {'3': 3}])
+            self.assertEqual(result, [{"1": 1}, {"2": 2}, {"3": 3}])
 
         asyncio.run(test_async_conversion())
 
@@ -477,8 +492,7 @@ class TypeConverterTests(unittest.TestCase):
             phone: str
             address: str
 
-            def get_name(self) -> str:
-                ...
+            def get_name(self) -> str: ...
 
         class PersonDict(TypedDict):
             name: str
@@ -507,9 +521,7 @@ class TypeConverterTests(unittest.TestCase):
         @t.register_converter(dict, PersonDict)
         def convert_dict_to_persondict(data: dict):
             return PersonDict(
-                name=data["name"],
-                phone=data["phone"],
-                address=data["address"]
+                name=data["name"], phone=data["phone"], address=data["address"]
             )
 
         @t.register_converter(Person, str)
@@ -523,11 +535,11 @@ class TypeConverterTests(unittest.TestCase):
         @t.register_converter(dict, B)
         def convert_dict_to_b(data: dict):
             return B(data["name"], data["phone"], data["address"])
-        
+
         @t.auto_convert(protocol=True)
         async def test(a: str):
             return a
-        
+
         @t.auto_convert(protocol=True)
         async def tests(a: list[str]):
             return a
@@ -542,6 +554,7 @@ class TypeConverterTests(unittest.TestCase):
             self.assertEqual(result, ["John 123 123"])
 
         asyncio.run(test_async_conversion_protocol())
+
 
 if __name__ == "__main__":
     unittest.main()

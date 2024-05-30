@@ -279,7 +279,7 @@ TestFloat-.->float
 - [X] 结构类型 (Structural type)
 - [X] 协议类型 (Protocol type) (只支持输入类型)
 - [X] 字典类型 (TypedDict type)
-- [ ] 泛型类型 (Generic type)
+- [X] 泛型类型 (Generic type)
 
 ## 许可
 此项目使用 MIT 许可证。
