@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 import asyncio
-from typing import TypeVar
+from typing import TypeVar, Generic
 
 from typegraph.converter.base import TypeConverter
 
@@ -229,10 +229,6 @@ class TypeConverterTests(unittest.TestCase):
 
         class Test2(int): ...
 
-        class Test3: ...
-
-        class Test4: ...
-
         @t.register_converter(str, int)
         def str_to_int(input_value):
             return int(input_value)
@@ -263,8 +259,8 @@ class TypeConverterTests(unittest.TestCase):
         def str_to_float(input_value):
             return float(input_value)
 
-        @self.converter.async_register_converter(dict[K,V], dict[V,K])
-        async def reverse_dict(d: dict[K,V]) -> dict[V,K]:
+        @self.converter.async_register_converter(dict[K, V], dict[V, K])
+        async def reverse_dict(d: dict[K, V]) -> dict[V, K]:
             return {v: k for k, v in d.items()}
 
         @self.converter.auto_convert(localns=locals())
@@ -291,10 +287,6 @@ class TypeConverterTests(unittest.TestCase):
         def test_next_structural(x: list[dict[str, int]]):
             return x
 
-        @self.converter.auto_convert()
-        def test_structural_dict(x: list[dict[str, int]]):
-            return x
-
         result = test_float_to_str("10")
         self.assertEqual(result, "10")
 
@@ -317,8 +309,7 @@ class TypeConverterTests(unittest.TestCase):
         self.assertEqual(result, ["1", "2", "3"])
 
         result = test_next_structural([{1: "1"}, {2: "2"}, {3: "3"}])
-        self.assertEqual(result, [{'1': 1}, {'2': 2}, {'3': 3}])
-
+        self.assertEqual(result, [{"1": 1}, {"2": 2}, {"3": 3}])
 
     def test_auto_convert_protocol(self):
         from typing import Protocol, TypedDict
@@ -390,6 +381,35 @@ class TypeConverterTests(unittest.TestCase):
 
         result = tests([d])
         self.assertEqual(result, ["John 123 123"])
+
+    def test_auto_convert_generic(self):
+        t = self.converter
+
+        class A: ...
+
+        class B(Generic[K, V]): ...
+
+        @t.register_converter(list[dict[str, int]], A)
+        def convert_list_dict_to_a(data: list[dict[str, int]]):
+            return A()
+
+        @t.register_generic_converter(dict[K, V], dict[V, K])  # type: ignore
+        def convert_dict(data: dict[K, V]):
+            return {v: k for k, v in data.items()}
+
+        @t.register_generic_converter(dict[V, K], B[V, K])  # type: ignore
+        def convert_dict_to_b(data: dict[V, K]):
+            return B[V, K]()
+
+        @t.auto_convert(localns=locals())
+        def test_generic(a: "B[str, int]"):
+            return a
+
+        result = test_generic({1: "1", 2: "2"})
+        self.assertIsInstance(result, B)
+
+        result = test_generic({"1": 1, "2": 2})
+        self.assertIsInstance(result, B)
 
     def test_async_auto_convert(self):
         t = self.converter
@@ -554,6 +574,38 @@ class TypeConverterTests(unittest.TestCase):
             self.assertEqual(result, ["John 123 123"])
 
         asyncio.run(test_async_conversion_protocol())
+
+    def test_async_auto_convert_generic(self):
+        t = self.converter
+
+        class A: ...
+
+        class B(Generic[K, V]): ...
+
+        @t.register_converter(list[dict[str, int]], A)
+        def convert_list_dict_to_a(data: list[dict[str, int]]):
+            return A()
+
+        @t.register_generic_converter(dict[K, V], dict[V, K])  # type: ignore
+        def convert_dict(data: dict[K, V]):
+            return {v: k for k, v in data.items()}
+
+        @t.register_generic_converter(dict[V, K], B[V, K])  # type: ignore
+        def convert_dict_to_b(data: dict[V, K]):
+            return B[V, K]()
+
+        @t.auto_convert(localns=locals())
+        async def test_generic(a: "B[str, int]"):
+            return a
+
+        async def test_async_auto_convert_generic():
+            result = await test_generic({1: "1", 2: "2"})
+            self.assertIsInstance(result, B)
+
+            result = await test_generic({"1": 1, "2": 2})
+            self.assertIsInstance(result, B)
+
+        asyncio.run(test_async_auto_convert_generic())
 
 
 if __name__ == "__main__":

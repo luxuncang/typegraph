@@ -1,3 +1,4 @@
+from __future__ import annotations
 from typing import (
     TypeVar,
     List,
@@ -12,7 +13,7 @@ from typing_extensions import get_args
 from typing_inspect import is_typevar
 
 from ..type_utils import (
-    get_origin as get_real_origin,
+    get_real_origin,
     generate_type,
 )
 
@@ -53,6 +54,33 @@ class TypeVarModel:
             else:
                 raise ValueError("Invalid TypeVarModel")
         return generate_type(generic, args_list)
+
+    def replace_args(self, source: TypeVarModel, target: TypeVarModel) -> 'TypeVarModel':
+        if self.args is None:
+            return TypeVarModel(self.origin)
+
+        new_args = []
+        for arg in self.args:
+            if isinstance(arg, TypeVarModel):
+                if arg == source:
+                    new_args.append(target)
+                else:
+                    new_args.append(arg.replace_args(source, target))
+            elif isinstance(arg, list):
+                new_list = []
+                for item in arg:
+                    if isinstance(item, TypeVarModel):
+                        if item == source:
+                            new_list.append(target)
+                        else:
+                            new_list.append(item.replace_args(source, target))
+                    else:
+                        new_list.append(item)
+                new_args.append(new_list)
+            else:
+                new_args.append(arg)
+        
+        return TypeVarModel(self.origin, new_args)
 
     def depth_first_traversal(self, parent=None, parent_arg_index=None, depth=1):
         if self.args:

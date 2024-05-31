@@ -10,20 +10,24 @@ from typing import (
     Set,
     Iterable,
     Iterator,
+    Sequence,
+    MutableSequence,
     cast,
     Type,
     Awaitable,
     Any,
     Optional,
+    Mapping,
+    MutableMapping,
     get_type_hints,
-    Generic,
+    is_typeddict,
 )
 from functools import wraps, reduce
 
 import networkx as nx
 from typing_extensions import get_args, get_origin
 from typing_inspect import is_union_type, get_generic_type
-from typeguard import check_type, TypeCheckError, CollectionCheckStrategy
+from typeguard import check_type, CollectionCheckStrategy
 
 from .typevar import iter_deep_type, gen_typevar_model, extract_typevar_mapping
 from ..type_utils import (
@@ -32,6 +36,8 @@ from ..type_utils import (
     is_protocol_type,
     check_protocol_type,
     get_subclass_types,
+    get_connected_subgraph,
+    iter_type_args,
 )
 
 
@@ -50,6 +56,7 @@ class TypeConverter:
         self.pG = nx.DiGraph()
         self.tG = nx.DiGraph()
         self.pmG = nx.DiGraph()
+        self.qG = nx.DiGraph()
         TypeConverter.instances.append(self)
 
     def get_graph(
@@ -96,8 +103,6 @@ class TypeConverter:
                 metadata={"protocol": True},
             )
         for p_type in self.get_protocol_types(out_type):
-            if out_type == str:
-                print(p_type, in_type, out_type, converter)
             self.pG.add_edge(
                 out_type,
                 p_type,
@@ -110,6 +115,11 @@ class TypeConverter:
         tmp_G = nx.DiGraph()
         im = gen_typevar_model(in_type)
         om = gen_typevar_model(out_type)
+
+        def _gen_sub_graph(mapping, node):
+            for su, sv, sc in get_connected_subgraph(self.tG, node).edges(data=True):
+                tmp_G.add_edge(su.get_instance(mapping), sv.get_instance(mapping), **sc)
+
         for u, v, c in self.tG.edges(data=True):
             um = gen_typevar_model(u)
             vm = gen_typevar_model(v)
@@ -120,8 +130,27 @@ class TypeConverter:
                     tmp_G.add_edge(
                         um.get_instance(mapping), vm.get_instance(mapping), **c
                     )
+                    _gen_sub_graph(mapping, t)
                 except Exception:
                     ...
+
+            for su, sv, sc in self.G.edges(data=True):
+                su_m = gen_typevar_model(su)
+                for arg in iter_type_args(su_m):
+                    try:
+                        mapping = extract_typevar_mapping(um, arg)
+                        sub_m = su_m.replace_args(
+                            arg,
+                            gen_typevar_model(vm.get_instance(mapping)),  # type: ignore
+                        ).get_instance()
+                        tmp_G.add_edge(
+                            sub_m,
+                            sv,
+                            **sc,
+                        )
+                    except Exception:
+                        ...
+        self.qG = nx.compose(self.qG, tmp_G)
         return tmp_G
 
     def register_generic_converter(self, input_type: Type, out_type: Type):
@@ -333,6 +362,8 @@ class TypeConverter:
                     res = map(_iter_func, input_value)
                 elif in_origin == dict or out_origin == Dict:
                     res = dict(map(__iter_func_dict, input_value.items()))
+                elif out_origin in (Mapping, MutableMapping):
+                    res = dict(map(__iter_func_dict, input_value.items()))
                 else:
                     raise ValueError(
                         f"Unsupported structural_type {input_type} to {out_type}"
@@ -408,6 +439,11 @@ class TypeConverter:
                 elif out_origin in (Iterable, Iterator):
                     res = await asyncio.gather(*map(_iter_func, input_value))
                 elif in_origin == dict or out_origin == Dict:
+                    items = await asyncio.gather(
+                        *map(__iter_func_dict, input_value.items())
+                    )
+                    res = dict(items)
+                elif out_origin in (Mapping, MutableMapping):
                     items = await asyncio.gather(
                         *map(__iter_func_dict, input_value.items())
                     )
@@ -497,17 +533,38 @@ class TypeConverter:
         ):
             yield edge
 
-    def show_mermaid_graph(self, sub_class: bool = False, protocol: bool = False):
+    def show_mermaid_graph(
+        self, sub_class: bool = False, protocol: bool = False, full: bool = False
+    ):
         from IPython.display import display, Markdown
+        import typing
+
+        nodes = []
+
+        def get_name(cls):
+            if type(cls) in (typing._GenericAlias, typing.GenericAlias):  # type: ignore
+                return str(cls)
+            elif hasattr(cls, "__name__"):
+                return cls.__name__
+            return str(cls)
+
+        def get_node_name(cls):
+            return f"node{nodes.index(cls)}"
 
         text = "```mermaid\ngraph TD;\n"
-        for edge in self.get_edges(sub_class=sub_class, protocol=protocol):
-            line_style = "--" if edge[2]["line"] else "-.-"
-            text += f"{edge[0].__name__}{line_style}>{edge[1].__name__}\n"
+        for edge in self.get_graph(
+            sub_class=sub_class, protocol=protocol, combos=[self.qG] if full else None
+        ).edges(data=True):
+            if edge[0] not in nodes:
+                nodes.append(edge[0])
+            if edge[1] not in nodes:
+                nodes.append(edge[1])
+            line_style = "--" if edge[2].get("line", False) else "-.-"
+            text += f'{get_node_name(edge[0])}["{get_name(edge[0])}"] {line_style}> {get_node_name(edge[1])}["{get_name(edge[1])}"]\n'
         text += "```"
 
         display(Markdown(text))
-        return text
+        # return text
 
     def get_all_paths(
         self,
@@ -566,13 +623,21 @@ class TypeConverter:
         for edge in G.edges():
             if edge[0] in nodes:
                 continue
-            nodes.add(edge[0])
-            try:
-                check_type(
-                    input_value,
-                    edge[0],
-                    collection_check_strategy=CollectionCheckStrategy.ALL_ITEMS,
-                )
-            except Exception:
-                continue
-            yield edge[0]
+            if get_origin(edge[0]) in (
+                Iterable,
+                Iterator,
+                Mapping,
+                MutableMapping,
+                Sequence,
+                MutableSequence,
+            ) or is_typeddict(edge[0]):
+                nodes.add(edge[0])
+                try:
+                    check_type(
+                        input_value,
+                        edge[0],
+                        collection_check_strategy=CollectionCheckStrategy.ALL_ITEMS,
+                    )
+                except Exception:
+                    continue
+                yield edge[0]

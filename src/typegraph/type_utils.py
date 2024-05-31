@@ -1,19 +1,13 @@
 import types
 import typing
+import networkx as nx
 
-from typing import (
-    Union,
-    List,
-    Callable,
-    Any,
-    runtime_checkable,
-    Type,
-)
+from typing import Union, List, Callable, Any, runtime_checkable, Type, get_args
 from typing_extensions import get_type_hints
 from typing_inspect import get_generic_type
 
 
-def get_origin(tp):
+def get_real_origin(tp):
     """Get the unsubscripted version of a type.
 
     This supports generic types, Callable, Tuple, Union, Literal, Final, ClassVar
@@ -37,7 +31,7 @@ def get_origin(tp):
     if isinstance(
         tp,
         (
-            typing._BaseGenericAlias, # type: ignore
+            typing._BaseGenericAlias,  # type: ignore
             typing.GenericAlias,  # type: ignore
             typing.ParamSpecArgs,
             typing.ParamSpecKwargs,
@@ -52,7 +46,7 @@ def get_origin(tp):
 
 
 def is_structural_type(tp):
-    if get_origin(tp):
+    if get_real_origin(tp):
         return True
     return False
 
@@ -156,3 +150,39 @@ def get_subclass_types(cls: Type):
         for subclass in cls.__subclasses__():
             yield subclass
             yield from get_subclass_types(subclass)
+
+
+def get_connected_nodes(graph, node):
+    if node not in graph:
+        return set()
+
+    # 获取正向连通的节点
+    successors = set(nx.descendants(graph, node))
+
+    # 获取逆向连通的节点
+    predecessors = set(nx.ancestors(graph, node))
+
+    # 合并所有连通的节点
+    connected_nodes = successors | predecessors | {node}
+
+    return connected_nodes
+
+
+def get_connected_subgraph(graph, node):
+    connected_nodes = get_connected_nodes(graph, node)
+    subgraph = graph.subgraph(connected_nodes).copy()
+    return subgraph
+
+
+def iter_type_args(tp):
+    args = tp.args
+    if args:
+        for arg in args:
+            if isinstance(arg, list):
+                for i in arg:
+                    yield i
+                    yield from iter_type_args(i)
+            else:
+                yield arg
+                yield from iter_type_args(arg)
+
