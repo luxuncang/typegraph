@@ -1,21 +1,13 @@
 from __future__ import annotations
-from typing import (
-    TypeVar,
-    List,
-    Type,
-    Any,
-    Optional,
-)
+from typing import TypeVar, List, Type, Any, Optional, Union
+import types
 from dataclasses import dataclass
 from collections import deque
 
 from typing_extensions import get_args
 from typing_inspect import is_typevar
 
-from ..type_utils import (
-    get_real_origin,
-    generate_type,
-)
+from ..type_utils import get_real_origin, generate_type, like_issubclass
 
 In = TypeVar("In", contravariant=True)
 
@@ -54,8 +46,10 @@ class TypeVarModel:
             else:
                 raise ValueError("Invalid TypeVarModel")
         return generate_type(generic, args_list)
-
-    def replace_args(self, source: TypeVarModel, target: TypeVarModel) -> 'TypeVarModel':
+        
+    def replace_args(
+        self, source: TypeVarModel, target: TypeVarModel
+    ) -> "TypeVarModel":
         if self.args is None:
             return TypeVarModel(self.origin)
 
@@ -79,7 +73,7 @@ class TypeVarModel:
                 new_args.append(new_list)
             else:
                 new_args.append(arg)
-        
+
         return TypeVarModel(self.origin, new_args)
 
     def depth_first_traversal(self, parent=None, parent_arg_index=None, depth=1):
@@ -167,7 +161,7 @@ def gen_typevar_model(invar: Type[In]):
             args_list.append([gen_typevar_model(a) for a in arg])
         else:
             args_list.append(gen_typevar_model(arg))
-    obj = TypeVarModel(origin=origin, args=args_list)
+    obj = TypeVarModel(origin=origin, args=args_list or None)
     return obj
 
 
@@ -188,7 +182,6 @@ def infer_generic_type(type_var: Type[Any], instance: dict[Type[TypeVar], Type])
 def extract_typevar_mapping(
     template: TypeVarModel | Type | Any,
     instance: TypeVarModel | Type | Any,
-    check_origin: bool = True,
 ) -> dict[Type[TypeVar], Type]:
     """Extracts type variable mappings from the template and instance TypeVarModel."""
     typevar_mapping = {}
@@ -199,45 +192,65 @@ def extract_typevar_mapping(
         instance = gen_typevar_model(instance)
 
     def traverse(template_node: TypeVarModel, instance_node: TypeVarModel):
-        if check_origin:
-            if not is_typevar(template_node.origin):
-                if not issubclass(instance_node.origin, template_node.origin):
+        if is_typevar(template_node.origin):
+            typevar_mapping[template_node.origin] = instance_node.get_instance()
+        elif like_issubclass(instance_node.origin, template_node.origin):
+            if template_node.args and instance_node.args:
+                if len(template_node.args) != len(instance_node.args):
                     raise ValueError(
-                        f"Origin mismatch: {template_node.origin} vs {instance_node.origin}"
+                        "Template and instance have a different number of arguments"
                     )
-
-        if isinstance(template_node.origin, TypeVar):
-            if isinstance(instance_node.origin, type):
-                typevar_mapping[template_node.origin] = instance_node.origin
-            else:
-                raise ValueError(
-                    f"Instance node doesn't match the expected type: {instance_node.origin}"
-                )
-
-        if template_node.args and instance_node.args:
-            if len(template_node.args) != len(instance_node.args):
-                raise ValueError(
-                    "Template and instance have a different number of arguments"
-                )
-
-            for tmpl_arg, inst_arg in zip(template_node.args, instance_node.args):
-                if isinstance(tmpl_arg, TypeVarModel) and isinstance(
-                    inst_arg, TypeVarModel
-                ):
-                    traverse(tmpl_arg, inst_arg)
-                elif isinstance(tmpl_arg, list) and isinstance(inst_arg, list):
-                    for t_arg, i_arg in zip(tmpl_arg, inst_arg):
-                        if isinstance(t_arg, TypeVarModel) and isinstance(
-                            i_arg, TypeVarModel
-                        ):
-                            traverse(t_arg, i_arg)
-                else:
-                    raise ValueError(
-                        "Mismatch in structure between template and instance"
-                    )
+                for tmpl_arg, inst_arg in zip(template_node.args, instance_node.args):
+                    if isinstance(tmpl_arg, TypeVarModel) and isinstance(
+                        inst_arg, TypeVarModel
+                    ):
+                        traverse(tmpl_arg, inst_arg)
+                    elif isinstance(tmpl_arg, list) and isinstance(inst_arg, list):
+                        for t_arg, i_arg in zip(tmpl_arg, inst_arg):
+                            if isinstance(t_arg, TypeVarModel) and isinstance(
+                                i_arg, TypeVarModel
+                            ):
+                                traverse(t_arg, i_arg)
+                    else:
+                        raise ValueError(
+                            "Mismatch in structure between template and instance"
+                        )
         else:
-            if template_node.args or instance_node.args:
-                raise ValueError("Mismatch in structure between template and instance")
+            raise ValueError(
+                f"Instance node doesn't match the expected type: {template_node.origin} vs {instance_node.origin}"
+            )
 
     traverse(template, instance)
     return typevar_mapping
+
+
+def check_typevar_model(template: TypeVarModel, instance: TypeVarModel) -> bool:
+    if not like_issubclass(instance.origin, template.origin):
+        return False
+    if template.args is None and instance.args is None:
+        return True
+    if template.args is not None and instance.args is None:
+        return False
+    if template.args is None and instance.args is not None:
+        return True
+    for t_arg, i_arg in zip(template.args, instance.args): # type: ignore
+        if isinstance(t_arg, TypeVarModel) and isinstance(i_arg, TypeVarModel):
+            if t_arg.origin in (types.UnionType, Union):
+                if not any(
+                    check_typevar_model(t_sub_arg, i_arg) for t_sub_arg in t_arg.args # type: ignore
+                ):
+                    return False
+            elif not check_typevar_model(t_arg, i_arg):
+                return False
+        elif isinstance(t_arg, list) and isinstance(i_arg, list):
+            for t_sub_arg, i_sub_arg in zip(t_arg, i_arg):
+                if isinstance(t_sub_arg, TypeVarModel) and isinstance(
+                    i_sub_arg, TypeVarModel
+                ):
+                    if not check_typevar_model(t_sub_arg, i_sub_arg):
+                        return False
+                else:
+                    return False
+        else:
+            return False
+    return True
