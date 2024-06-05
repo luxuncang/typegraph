@@ -1,4 +1,4 @@
-from .base import TypeConverter
+from .base import TypeConverter, PdtConverter
 from .typevar import (
     TypeVarModel,
     iter_deep_type,

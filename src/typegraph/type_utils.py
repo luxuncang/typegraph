@@ -1,6 +1,7 @@
 import types
-import collections
 import typing
+
+from pydantic import TypeAdapter
 import networkx as nx
 
 from typing import Union, List, Callable, Any, runtime_checkable, Type, get_args, get_origin
@@ -191,9 +192,21 @@ def like_issubclass(tp, expected_type):
     if tp == expected_type or expected_type == Any:
         return True
     try:
+        if is_protocol_type(expected_type):
+            return check_protocol_type(tp, expected_type)
         if issubclass(tp, expected_type):
             return True
     except TypeError:
         if get_origin(tp) == expected_type:
             return True
     return False
+
+def like_isinstance(obj, expected_type):
+    res = False
+    try:
+        t = TypeAdapter(expected_type)
+        t.validate_python(obj, strict=True)
+        res = True
+    except Exception:
+        ...
+    return res

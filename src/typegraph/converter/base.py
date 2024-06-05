@@ -1,5 +1,6 @@
 import inspect
 import asyncio
+import itertools
 from typing import (
     TypeVar,
     ParamSpec,
@@ -25,11 +26,17 @@ from typing import (
 from functools import wraps, reduce
 
 import networkx as nx
+from pydantic import BaseModel
 from typing_extensions import get_args, get_origin
 from typing_inspect import is_union_type, get_generic_type
 from typeguard import check_type, CollectionCheckStrategy
 
-from .typevar import iter_deep_type, gen_typevar_model, extract_typevar_mapping
+from .typevar import (
+    iter_deep_type,
+    gen_typevar_model,
+    extract_typevar_mapping,
+    check_typevar_model,
+)
 from ..type_utils import (
     is_structural_type,
     deep_type,
@@ -37,7 +44,7 @@ from ..type_utils import (
     check_protocol_type,
     get_subclass_types,
     get_connected_subgraph,
-    iter_type_args,
+    like_isinstance,
 )
 
 
@@ -133,23 +140,6 @@ class TypeConverter:
                     _gen_sub_graph(mapping, t)
                 except Exception:
                     ...
-
-            for su, sv, sc in self.G.edges(data=True):
-                su_m = gen_typevar_model(su)
-                for arg in iter_type_args(su_m):
-                    try:
-                        mapping = extract_typevar_mapping(um, arg)
-                        sub_m = su_m.replace_args(
-                            arg,
-                            gen_typevar_model(vm.get_instance(mapping)),  # type: ignore
-                        ).get_instance()
-                        tmp_G.add_edge(
-                            sub_m,
-                            sv,
-                            **sc,
-                        )
-                    except Exception:
-                        ...
         self.qG = nx.compose(self.qG, tmp_G)
         return tmp_G
 
@@ -641,3 +631,199 @@ class TypeConverter:
                 except Exception:
                     continue
                 yield edge[0]
+
+
+class PdtConverter:
+    def __init__(self):
+        self.G = nx.DiGraph()
+
+    def get_graph(self):
+        return self.G
+
+    def _gen_edge(
+        self, in_type: Type[In], out_type: Type[Out], converter: Callable[P, Out]
+    ):
+        edges = []
+        
+        for node in self.get_graph().nodes():
+            group = [(in_type, node), (out_type, node), (node, in_type), (node, out_type)]
+            for u, v in group:
+                if u == v:
+                    continue
+                if self.like_issubclass(u, v):
+                    edges.append((u, v, {"converter": lambda x: x, "line": False}))
+        edges.append((in_type, out_type, {"converter": converter, "line": True}))
+        for u, v, d in edges:
+            self.G.add_edge(u, v, **d)
+
+
+    def register_converter(self, input_type: Type[In], out_type: Type[Out]):
+        def decorator(func: Callable[P, T]) -> Callable[P, Out]:
+            self._gen_edge(input_type, out_type, func)
+            return cast(Callable[P, Out], func)
+
+        return decorator
+
+    def async_register_converter(self, input_type: Type[In], out_type: Type[Out]):
+        def decorator(func: Callable[P, Awaitable[Out]]):
+            self._gen_edge(input_type, out_type, func)
+            return func
+
+        return decorator
+
+    def can_convert(self, in_type: Type[In], out_type: Type[Out]) -> bool:
+        try:
+            nx.has_path(self.get_graph(), in_type, out_type)
+            res = True
+        except nx.NodeNotFound:
+            res = False
+        return res
+
+    def get_converter(self, in_type: Type[In], out_type: Type[Out]):
+        for path in nx.shortest_simple_paths(self.get_graph(), in_type, out_type):
+            converters = [
+                self.G.get_edge_data(path[i], path[i + 1])["converter"]
+                for i in range(len(path) - 1)
+            ]
+            if len(path) == 1 and len(converters) == 0:
+                path, converters = path * 2, [lambda x: x]
+            func = reduce(lambda f, g: lambda x: g(f(x)), converters)
+            yield path, func
+
+    def convert(self, input_value, out_type: Type[Out], debug: bool = False) -> Out:
+        input_type = deep_type(input_value)
+        for source, target in self.get_all_paths(input_value, out_type):
+            for path, func in self.get_converter(source, target):
+                if debug:
+                    print(f"Converting {source} to {target} using {path}, {func}")
+                try:
+                    return func(input_value)
+                except Exception:
+                    ...
+
+        raise ValueError(f"No converter registered for {input_type} to {out_type}")
+
+    async def async_convert(
+        self, input_value, out_type: Type[Out], debug: bool = False
+    ) -> Out:
+        input_type = deep_type(input_value)
+        for source, target in self.get_all_paths(input_value, out_type):
+            for path, func in self.get_converter(source, target):
+                if debug:
+                    print(f"Converting {source} to {target} using {path}, {func}")
+                try:
+                    return await func(input_value)
+                except Exception:
+                    ...
+        raise ValueError(f"No converter registered for {input_type} to {out_type}")
+
+    def auto_convert(
+        self,
+        ignore_error: bool = False,
+        localns: dict[str, Any] | None = None,
+        globalns: dict[str, Any] | None = None,
+    ):
+        def decorator(func: Callable[P, T]):
+            sig = inspect.signature(func)
+            hints = get_type_hints(
+                func, include_extras=True, globalns=globalns, localns=localns
+            )
+
+            @wraps(func)
+            def wrapper(*args, **kwargs) -> T:
+                bound = sig.bind(*args, **kwargs)
+                for name, value in bound.arguments.items():
+                    if name in hints:
+                        try:
+                            bound.arguments[name] = self.convert(
+                                value,
+                                hints[name],
+                            )
+                        except Exception as e:
+                            if ignore_error:
+                                continue
+                            raise e
+                return func(*bound.args, **bound.kwargs)
+
+            return wrapper
+
+        return decorator
+
+    def async_auto_convert(
+        self,
+        ignore_error: bool = False,
+        localns: dict[str, Any] | None = None,
+        globalns: dict[str, Any] | None = None,
+    ):
+        def decorator(func: Callable[P, Awaitable[T]]):
+            sig = inspect.signature(func)
+            hints = get_type_hints(
+                func, include_extras=True, globalns=globalns, localns=localns
+            )
+
+            @wraps(func)
+            async def wrapper(*args, **kwargs) -> T:
+                bound = sig.bind(*args, **kwargs)
+                for name, value in bound.arguments.items():
+                    if name in hints:
+                        try:
+                            bound.arguments[name] = await self.async_convert(
+                                value,
+                                hints[name],
+                            )
+                        except Exception as e:
+                            if ignore_error:
+                                continue
+                            raise e
+                return await func(*bound.args, **bound.kwargs)
+
+            return wrapper
+
+        return decorator
+
+    def show_mermaid_graph(self):
+        from IPython.display import display, Markdown
+        import typing
+
+        nodes = []
+
+        def get_name(cls):
+            if type(cls) in (typing._GenericAlias, typing.GenericAlias):  # type: ignore
+                return str(cls)
+            elif hasattr(cls, "__name__"):
+                return cls.__name__
+            return str(cls)
+
+        def get_node_name(cls):
+            return f"node{nodes.index(cls)}"
+
+        text = "```mermaid\ngraph TD;\n"
+        for edge in self.get_graph().edges(data=True):
+            if edge[0] not in nodes:
+                nodes.append(edge[0])
+            if edge[1] not in nodes:
+                nodes.append(edge[1])
+            line_style = "--" if edge[2].get("line", False) else "-.-"
+            text += f'{get_node_name(edge[0])}["{get_name(edge[0])}"] {line_style}> {get_node_name(edge[1])}["{get_name(edge[1])}"]\n'
+        text += "```"
+
+        display(Markdown(text))
+
+    def get_all_paths(self, in_value: In, out_type: Type[Out]):
+        source, target = [], []
+        in_type = deep_type(in_value)
+        for node in self.get_graph().nodes():
+            if self.like_isinstance(in_value, node):
+                source.append(node)
+            if self.like_issubclass(out_type, node):
+                target.append(node)
+            if self.like_issubclass(in_type, node):
+                source.append(node)
+
+        return itertools.product(source, target)
+
+    def like_issubclass(self, obj, cls: Type):
+        return check_typevar_model(obj, cls)
+
+    def like_isinstance(self, obj, cls: Type):
+        return like_isinstance(obj, cls)
