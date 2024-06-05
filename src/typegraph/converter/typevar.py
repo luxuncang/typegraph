@@ -232,6 +232,11 @@ def check_typevar_model(
     if not isinstance(instance, TypeVarModel):
         instance = gen_typevar_model(instance)
 
+    if template.origin in (Union, types.UnionType):
+        return any(check_typevar_model(instance, t_sub_arg) for t_sub_arg in template.args)
+    if instance.origin in (Union, types.UnionType):
+        return any(check_typevar_model(i_sub_arg, template) for i_sub_arg in instance.args)
+
     if not like_issubclass(instance.origin, template.origin):
         return False
     if template.args is None and instance.args is None:
@@ -240,7 +245,7 @@ def check_typevar_model(
         return False
     if template.args is None and instance.args is not None:
         return True
-    for t_arg, i_arg in zip(template.args, instance.args):  # type: ignore
+    for t_arg, i_arg in zip(instance.args, template.args):  # type: ignore
         if isinstance(t_arg, TypeVarModel) and isinstance(i_arg, TypeVarModel):
             if t_arg.origin in (types.UnionType, Union):
                 if not any(

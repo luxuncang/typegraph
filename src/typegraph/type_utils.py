@@ -4,7 +4,16 @@ import typing
 from pydantic import TypeAdapter
 import networkx as nx
 
-from typing import Union, List, Callable, Any, runtime_checkable, Type, get_args, get_origin
+from typing import (
+    Union,
+    List,
+    Callable,
+    Any,
+    runtime_checkable,
+    Type,
+    get_args,
+    get_origin,
+)
 from typing_extensions import get_type_hints
 from typing_inspect import get_generic_type
 
@@ -188,6 +197,7 @@ def iter_type_args(tp):
                 yield arg
                 yield from iter_type_args(arg)
 
+
 def like_issubclass(tp, expected_type):
     if tp == expected_type or expected_type == Any:
         return True
@@ -200,6 +210,7 @@ def like_issubclass(tp, expected_type):
         if get_origin(tp) == expected_type:
             return True
     return False
+
 
 def like_isinstance(obj, expected_type):
     res = False
