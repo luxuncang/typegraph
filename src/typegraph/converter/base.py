@@ -636,26 +636,67 @@ class TypeConverter:
 class PdtConverter:
     def __init__(self):
         self.G = nx.DiGraph()
+        self.sG = nx.DiGraph()
+        self.tG = nx.DiGraph()
+        self.qG = nx.DiGraph()
 
     def get_graph(self):
-        return self.G
+        return nx.all.compose_all([self.G, self.sG, self.qG])
+
+    def _gen_graph(self, in_type: Type[In], out_type: Type[Out]):
+        tmp_G = nx.DiGraph()
+        im = gen_typevar_model(in_type)
+        om = gen_typevar_model(out_type)
+
+        def _gen_sub_graph(mapping, node):
+            for su, sv, sc in get_connected_subgraph(self.tG, node).edges(data=True):
+                tmp_G.add_edge(su.get_instance(mapping), sv.get_instance(mapping), **sc)
+
+        for u, v, c in self.tG.edges(data=True):
+            um = gen_typevar_model(u)
+            vm = gen_typevar_model(v)
+            combos = [(um, im), (vm, im), (um, om), (vm, om)]
+            for t, i in combos:
+                try:
+                    mapping = extract_typevar_mapping(t, i)
+                    tmp_G.add_edge(
+                        um.get_instance(mapping), vm.get_instance(mapping), **c
+                    )
+                    _gen_sub_graph(mapping, t)
+                except Exception:
+                    ...
+        self.qG = nx.compose(self.qG, tmp_G)
+        return tmp_G
 
     def _gen_edge(
         self, in_type: Type[In], out_type: Type[Out], converter: Callable[P, Out]
     ):
         edges = []
-        
+
         for node in self.get_graph().nodes():
-            group = [(in_type, node), (out_type, node), (node, in_type), (node, out_type)]
+            group = [
+                (in_type, node),
+                (out_type, node),
+                (node, in_type),
+                (node, out_type),
+            ]
             for u, v in group:
                 if u == v:
                     continue
                 if self.like_issubclass(u, v):
                     edges.append((u, v, {"converter": lambda x: x, "line": False}))
-        edges.append((in_type, out_type, {"converter": converter, "line": True}))
-        for u, v, d in edges:
-            self.G.add_edge(u, v, **d)
 
+        self.G.add_edge(in_type, out_type, converter=converter, line=True)
+
+        for u, v, d in edges:
+            self.sG.add_edge(u, v, **d)
+
+    def register_generic_converter(self, input_type: Type, out_type: Type):
+        def decorator(func: Callable[P, T]):
+            self.tG.add_edge(input_type, out_type, converter=func)
+            return func
+
+        return decorator
 
     def register_converter(self, input_type: Type[In], out_type: Type[Out]):
         def decorator(func: Callable[P, T]) -> Callable[P, Out]:
@@ -680,15 +721,39 @@ class PdtConverter:
         return res
 
     def get_converter(self, in_type: Type[In], out_type: Type[Out]):
-        for path in nx.shortest_simple_paths(self.get_graph(), in_type, out_type):
+        G = self.get_graph()
+        for path in nx.shortest_simple_paths(G, in_type, out_type):
             converters = [
-                self.G.get_edge_data(path[i], path[i + 1])["converter"]
+                G.get_edge_data(path[i], path[i + 1])["converter"]
                 for i in range(len(path) - 1)
             ]
             if len(path) == 1 and len(converters) == 0:
                 path, converters = path * 2, [lambda x: x]
             func = reduce(lambda f, g: lambda x: g(f(x)), converters)
             yield path, func
+
+    async def async_get_converter(self, in_type: Type[In], out_type: Type[Out]):
+        def async_wrapper(converters):
+            async def async_converter(input_value):
+                for converter in converters:
+                    if inspect.iscoroutinefunction(converter):
+                        input_value = await converter(input_value)
+                    else:
+                        input_value = converter(input_value)
+                return input_value
+
+            return async_converter
+
+        G = self.get_graph()
+
+        for path in nx.shortest_simple_paths(G, in_type, out_type):
+            converters = [
+                G.get_edge_data(path[i], path[i + 1])["converter"]
+                for i in range(len(path) - 1)
+            ]
+            if len(path) == 1 and len(converters) == 0:
+                path, converters = path * 2, [lambda x: x]
+            yield path, async_wrapper(converters)
 
     def convert(self, input_value, out_type: Type[Out], debug: bool = False) -> Out:
         input_type = deep_type(input_value)
@@ -700,6 +765,46 @@ class PdtConverter:
                     return func(input_value)
                 except Exception:
                     ...
+        if is_structural_type(input_type) and is_structural_type(out_type):
+            in_origin = get_origin(input_type)
+            out_origin = get_origin(out_type)
+            if self.like_issubclass(in_origin, out_origin):  # type: ignore
+                out_args = get_args(out_type)
+
+                def _iter_func(item):
+                    return self.convert(
+                        item,
+                        out_args[0],
+                        debug=debug,
+                    )
+
+                def __iter_func_dict(item):
+                    k, v = item
+                    return self.convert(
+                        k,
+                        out_args[0],
+                        debug=debug,
+                    ), self.convert(
+                        v,
+                        out_args[1],
+                        debug=debug,
+                    )
+
+                if self.like_issubclass(in_origin, list):
+                    res = list(map(_iter_func, input_value))
+                elif self.like_issubclass(in_origin, tuple):
+                    res = tuple(map(_iter_func, input_value))
+                elif self.like_issubclass(in_origin, set):
+                    res = set(map(_iter_func, input_value))
+                elif self.like_issubclass(in_origin, Mapping):
+                    res = dict(map(__iter_func_dict, input_value.items()))
+                elif self.like_issubclass(out_origin, Iterable):
+                    res = list(map(_iter_func, input_value))
+                else:
+                    raise ValueError(
+                        f"Unsupported structural_type {input_type} to {out_type}"
+                    )
+                return cast(Out, res)
 
         raise ValueError(f"No converter registered for {input_type} to {out_type}")
 
@@ -708,13 +813,56 @@ class PdtConverter:
     ) -> Out:
         input_type = deep_type(input_value)
         for source, target in self.get_all_paths(input_value, out_type):
-            for path, func in self.get_converter(source, target):
+            async for path, func in self.async_get_converter(source, target):
                 if debug:
                     print(f"Converting {source} to {target} using {path}, {func}")
                 try:
                     return await func(input_value)
-                except Exception:
-                    ...
+                except Exception as e:
+                    if debug:
+                        print(e)
+        if is_structural_type(input_type) and is_structural_type(out_type):
+            in_origin = get_origin(input_type)
+            out_origin = get_origin(out_type)
+            if self.like_issubclass(in_origin, out_origin):  # type: ignore
+                out_args = get_args(out_type)
+
+                async def _iter_func(item):
+                    return await self.async_convert(
+                        item,
+                        out_args[0],
+                        debug=debug,
+                    )
+
+                async def __iter_func_dict(item):
+                    k, v = item
+                    return await self.async_convert(
+                        k,
+                        out_args[0],
+                        debug=debug,
+                    ), await self.async_convert(
+                        v,
+                        out_args[1],
+                        debug=debug,
+                    )
+
+                if self.like_issubclass(in_origin, list):
+                    res = await asyncio.gather(*map(_iter_func, input_value))
+                elif self.like_issubclass(in_origin, tuple):
+                    res = tuple(await asyncio.gather(*map(_iter_func, input_value)))
+                elif self.like_issubclass(in_origin, set):
+                    res = set(await asyncio.gather(*map(_iter_func, input_value)))
+                elif self.like_issubclass(in_origin, Mapping):
+                    items = map(__iter_func_dict, input_value.items())
+                    res = dict(await asyncio.gather(*items))
+                elif self.like_issubclass(out_origin, Iterable):
+                    res = await asyncio.gather(*map(_iter_func, input_value))
+                else:
+                    raise ValueError(
+                        f"Unsupported structural_type {input_type} to {out_type}"
+                    )
+                return cast(Out, res)
+
         raise ValueError(f"No converter registered for {input_type} to {out_type}")
 
     def auto_convert(
@@ -781,13 +929,15 @@ class PdtConverter:
 
         return decorator
 
-    def show_mermaid_graph(self):
+    def show_mermaid_graph(self, graph: Optional[nx.DiGraph] = None):
         from IPython.display import display, Markdown
         import typing
 
         nodes = []
 
         def get_name(cls):
+            if get_origin(cls) in (typing.Annotated,):
+                return str(cls)
             if type(cls) in (typing._GenericAlias, typing.GenericAlias):  # type: ignore
                 return str(cls)
             elif hasattr(cls, "__name__"):
@@ -798,7 +948,11 @@ class PdtConverter:
             return f"node{nodes.index(cls)}"
 
         text = "```mermaid\ngraph TD;\n"
-        for edge in self.get_graph().edges(data=True):
+        for edge in (
+            self.get_graph().edges(data=True)
+            if graph is None
+            else graph.edges(data=True)
+        ):
             if edge[0] not in nodes:
                 nodes.append(edge[0])
             if edge[1] not in nodes:
@@ -809,9 +963,10 @@ class PdtConverter:
 
         display(Markdown(text))
 
-    def get_all_paths(self, in_value: In, out_type: Type[Out]):
+    def get_all_paths(self, in_value, out_type: Type[Out]):
         source, target = [], []
         in_type = deep_type(in_value)
+        self._gen_graph(in_type, out_type)
         for node in self.get_graph().nodes():
             if self.like_isinstance(in_value, node):
                 source.append(node)

@@ -39,9 +39,9 @@ pdm add typegraph3
 注册同步转换器并使用：
 
 ```python
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 
-converter = TypeConverter()
+converter = PdtConverter()
 
 @converter.register_converter(int, str)
 def int_to_str(value: int) -> str:
@@ -56,9 +56,9 @@ print(result)
 
 ```python
 import asyncio
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 
-converter = TypeConverter()
+converter = PdtConverter()
 
 @converter.async_register_converter(str, int)
 async def str_to_int(value: str) -> int:
@@ -139,7 +139,7 @@ def test(a: str):
 
 d = {"name": "John", "phone": "123", "address": "123"}
 
-t.convert([d], list[str], debug=True, protocol=True)
+t.convert([d], list[str], debug=True)
 ```
 
 `t.show_mermaid_graph()`
@@ -152,7 +152,7 @@ dict-->B
 Person-->str
 ```
 
-`t.show_mermaid_graph(protocol=True)`
+`t.show_mermaid_graph()`
 
 ```mermaid
 graph TD;
@@ -175,9 +175,9 @@ Converting dict[str, str] to <class 'str'> using [<class 'dict'>, <class '__main
 #### 同步
 
 ```python
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 
-converter = TypeConverter()
+converter = PdtConverter()
 
 @converter.register_converter(str, int)
 def str_to_int(value: str) -> int:
@@ -194,10 +194,10 @@ print(result)
 #### 异步
 
 ```python
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 import asyncio
 
-converter = TypeConverter()
+converter = PdtConverter()
 
 @converter.async_register_converter(str, int)
 async def str_to_int(value: str) -> int:
@@ -219,7 +219,7 @@ asyncio.run(test_async())
 提供了单元测试，以确保库的正确功能。运行测试：
 
 ```bash
-pytest test_switch.py
+pdm test
 ```
 
 测试覆盖了：
@@ -233,17 +233,13 @@ pytest test_switch.py
 您可以可视化类型转换图：
 
 ```python
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 
-t = TypeConverter()
+t = PdtConverter()
 
 class Test:
     def __init__(self, t):
         self.t = t
-
-class TestFloat(float):
-    ...
-
 
 @t.register_converter(float, Test)
 def str_to_Test(input_value):
@@ -257,7 +253,7 @@ def B_to_float(input_value):
 async def float_to_str(input_value):
     return str(input_value)
 
-t.show_mermaid_graph(subclass=True)
+t.show_mermaid_graph()
 ```
 
 
@@ -266,7 +262,6 @@ graph TD;
 float-->Test
 float-->str
 Test-->float
-TestFloat-.->float
 ```
 
 图将使用 mermaid 语法显示，您可以在线渲染或在支持的环境中（如 Jupyter Notebooks）进行渲染。
@@ -275,11 +270,12 @@ TestFloat-.->float
 
 - [X] 子类类型 (SubClass type)
 - [X] 联合类型 (Union type)
-- [X] 注解类型 (Annotated type)
+- [X] 注解类型 (Annotated type) `Pydantic Annotated[T, Feild(...)]`
 - [X] 结构类型 (Structural type)
-- [X] 协议类型 (Protocol type) (只支持输入类型)
+- [X] 协议类型 (Protocol type)
 - [X] 字典类型 (TypedDict type)
 - [X] 泛型类型 (Generic type)
+- [X] 数据类 (Dataclass/BaseModel)
 
 ## 许可
 此项目使用 MIT 许可证。

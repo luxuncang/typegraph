@@ -39,9 +39,9 @@ pdm add typegraph3
 Register and use a synchronous converter:
 
 ```python
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 
-converter = TypeConverter()
+converter = PdtConverter()
 
 @converter.register_converter(int, str)
 def int_to_str(value: int) -> str:
@@ -56,9 +56,9 @@ Register and use an asynchronous converter:
 
 ```python
 import asyncio
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 
-converter = TypeConverter()
+converter = PdtConverter()
 
 @converter.async_register_converter(str, int)
 async def str_to_int(value: str) -> int:
@@ -77,9 +77,9 @@ asyncio.run(test_async_conversion())
 from typing import Protocol, TypedDict, runtime_checkable
 from dataclasses import dataclass
 
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 
-t = TypeConverter()
+t = PdtConverter()
 
 class Person(Protocol):
     name: str
@@ -139,7 +139,7 @@ def test(a: str):
 
 d = {"name": "John", "phone": "123", "address": "123"}
 
-t.convert([d], list[str], debug=True, protocol=True)
+t.convert([d], list[str], debug=True)
 ```
 
 `t.show_mermaid_graph()`
@@ -152,7 +152,7 @@ dict-->B
 Person-->str
 ```
 
-`t.show_mermaid_graph(protocol=True)`
+`t.show_mermaid_graph()`
 
 ```mermaid
 graph TD;
@@ -175,9 +175,9 @@ Automatically convert function arguments based on type annotations:
 #### Synchronous
 
 ```python
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 
-converter = TypeConverter()
+converter = PdtConverter()
 
 @converter.register_converter(str, int)
 def str_to_int(value: str) -> int:
@@ -194,10 +194,10 @@ print(result)
 #### Asynchronous
 
 ```python
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 import asyncio
 
-converter = TypeConverter()
+converter = PdtConverter()
 
 @converter.async_register_converter(str, int)
 async def str_to_int(value: str) -> int:
@@ -219,7 +219,7 @@ asyncio.run(test_async())
 Unit tests are provided to ensure the library functions correctly. Run the tests:
 
 ```bash
-pytest test_switch.py
+pdm test
 ```
 
 Tests cover:
@@ -233,17 +233,13 @@ Tests cover:
 You can visualize the type conversion graph:
 
 ```python
-from typegraph import TypeConverter
+from typegraph import PdtConverter
 
-t = TypeConverter()
+t = PdtConverter()
 
 class Test:
     def __init__(self, t):
         self.t = t
-
-class TestFloat(float):
-    ...
-
 
 @t.register_converter(float, Test)
 def str_to_Test(input_value):
@@ -257,7 +253,7 @@ def B_to_float(input_value):
 async def float_to_str(input_value):
     return str(input_value)
 
-t.show_mermaid_graph(subclass=True)
+t.show_mermaid_graph()
 ```
 
 ```mermaid
@@ -265,7 +261,6 @@ graph TD;
 float-->Test
 float-->str
 Test-->float
-TestFloat-.->float
 ```
 
 The graph will be displayed using mermaid syntax, which can be rendered online or in supported environments like Jupyter Notebooks.
@@ -274,11 +269,12 @@ The graph will be displayed using mermaid syntax, which can be rendered online o
 
 - [X] Subclass type
 - [X] Union type
-- [X] Annotated type
+- [X] Annotated type `Pydantic Annotated[T, Feild(...)]`
 - [X] Structural type
-- [X] Protocol type (input types only)
+- [X] Protocol type
 - [X] TypedDict type
 - [X] Generic type
+- [X] Dataclass (Dataclass/BaseModel)
 
 ## License
 This project is licensed under the MIT License.
