@@ -643,8 +643,11 @@ class PdtConverter:
     def get_graph(self):
         return nx.all.compose_all([self.G, self.sG, self.qG])
 
-    def _gen_graph(self, in_type: Type[In], out_type: Type[Out]):
+    def _gen_graph(self, in_type: Type[In], out_type: Type[Out], deep: int = 2):
         tmp_G = nx.DiGraph()
+        if deep == 0:
+            return tmp_G
+
         im = gen_typevar_model(in_type)
         om = gen_typevar_model(out_type)
 
@@ -665,6 +668,9 @@ class PdtConverter:
                     _gen_sub_graph(mapping, t)
                 except Exception:
                     ...
+        for u, v, c in tmp_G.edges(data=True):
+            tmp_G = nx.compose(tmp_G, self._gen_graph(u, v, deep - 1))
+
         self.qG = nx.compose(self.qG, tmp_G)
         return tmp_G
 
@@ -716,21 +722,25 @@ class PdtConverter:
         try:
             nx.has_path(self.get_graph(), in_type, out_type)
             res = True
-        except nx.NodeNotFound:
+        except (nx.NodeNotFound, nx.NetworkXNoPath):
             res = False
         return res
 
     def get_converter(self, in_type: Type[In], out_type: Type[Out]):
         G = self.get_graph()
-        for path in nx.shortest_simple_paths(G, in_type, out_type):
-            converters = [
-                G.get_edge_data(path[i], path[i + 1])["converter"]
-                for i in range(len(path) - 1)
-            ]
-            if len(path) == 1 and len(converters) == 0:
-                path, converters = path * 2, [lambda x: x]
-            func = reduce(lambda f, g: lambda x: g(f(x)), converters)
-            yield path, func
+        if self.can_convert(in_type, out_type):
+            try:
+                for path in nx.shortest_simple_paths(G, in_type, out_type):
+                    converters = [
+                        G.get_edge_data(path[i], path[i + 1])["converter"]
+                        for i in range(len(path) - 1)
+                    ]
+                    if len(path) == 1 and len(converters) == 0:
+                        path, converters = path * 2, [lambda x: x]
+                    func = reduce(lambda f, g: lambda x: g(f(x)), converters)
+                    yield path, func
+            except nx.NetworkXNoPath:
+                ...
 
     async def async_get_converter(self, in_type: Type[In], out_type: Type[Out]):
         def async_wrapper(converters):
@@ -745,15 +755,18 @@ class PdtConverter:
             return async_converter
 
         G = self.get_graph()
-
-        for path in nx.shortest_simple_paths(G, in_type, out_type):
-            converters = [
-                G.get_edge_data(path[i], path[i + 1])["converter"]
-                for i in range(len(path) - 1)
-            ]
-            if len(path) == 1 and len(converters) == 0:
-                path, converters = path * 2, [lambda x: x]
-            yield path, async_wrapper(converters)
+        if self.can_convert(in_type, out_type):
+            try:
+                for path in nx.shortest_simple_paths(G, in_type, out_type):
+                    converters = [
+                        G.get_edge_data(path[i], path[i + 1])["converter"]
+                        for i in range(len(path) - 1)
+                    ]
+                    if len(path) == 1 and len(converters) == 0:
+                        path, converters = path * 2, [lambda x: x]
+                    yield path, async_wrapper(converters)
+            except nx.NetworkXNoPath:
+                ...
 
     def convert(self, input_value, out_type: Type[Out], debug: bool = False) -> Out:
         input_type = deep_type(input_value)

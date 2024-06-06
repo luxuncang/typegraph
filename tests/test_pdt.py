@@ -10,9 +10,9 @@ K = TypeVar("K")
 V = TypeVar("V")
 
 
-class TypeConverterTests(unittest.TestCase):
+class PdtConverterTests(unittest.TestCase):
     def setUp(self):
-        self.converter = TypeConverter()
+        self.converter = PdtConverter()
 
     def test_register_converter(self):
         @self.converter.register_converter(int, str)
@@ -47,14 +47,11 @@ class TypeConverterTests(unittest.TestCase):
         self.assertFalse(self.converter.can_convert(Test, int))
 
         self.assertFalse(self.converter.can_convert(Test, str))
-        self.assertTrue(self.converter.can_convert(Test, str, sub_class=True))
 
         self.assertFalse(self.converter.can_convert(str, float | int))
         self.assertFalse(self.converter.can_convert(int, float))
 
     def test_get_converter(self):
-        class Test(int): ...
-
         self.converter.register_converter(int, str)(str)
         self.converter.register_converter(str, int)(int)
 
@@ -70,16 +67,6 @@ class TypeConverterTests(unittest.TestCase):
         result = list(self.converter.get_converter(int, int))
         self.assertEqual(result[0][0], [int, int])
         self.assertEqual(result[0][1](10), 10)
-
-        # Test Union Type
-        result = list(self.converter.get_converter(int, float | str))
-        self.assertEqual(result[0][0], [int, str])
-        self.assertEqual(result[0][1](10), "10")
-
-        # Test Subclass
-        result = list(self.converter.get_converter(Test, str, sub_class=True))
-        self.assertEqual(result[0][0], [Test, str])
-        self.assertEqual(result[0][1](10), "10")
 
     def test_convert(self):
         class Test(int): ...
@@ -102,7 +89,7 @@ class TypeConverterTests(unittest.TestCase):
         self.assertEqual(result, "10")
 
         # Test Subclass
-        result = self.converter.convert(Test(10), str, sub_class=True)
+        result = self.converter.convert(Test(10), str)
         self.assertEqual(result, "10")
 
         # Test Structural
@@ -151,22 +138,6 @@ class TypeConverterTests(unittest.TestCase):
                 self.assertEqual(await converter(10), 10)
                 break
 
-            # Test Union Type
-            async for path, converter in self.converter.async_get_converter(
-                int, float | str
-            ):
-                self.assertEqual(path, [int, str])
-                self.assertEqual(await converter(10), "10")
-                break
-
-            # Test Subclass
-            async for path, converter in self.converter.async_get_converter(
-                Test, str, sub_class=True
-            ):
-                self.assertEqual(path, [Test, str])
-                self.assertEqual(await converter(10), "10")
-                break
-
         asyncio.run(test_async_get_converter())
 
     def test_async_convert(self):
@@ -195,7 +166,7 @@ class TypeConverterTests(unittest.TestCase):
             self.assertEqual(result, "10")
 
             # Test Subclass
-            result = await self.converter.async_convert(Test(10), str, sub_class=True)
+            result = await self.converter.async_convert(Test(10), str)
             self.assertEqual(result, "10")
 
             # Test Structural
@@ -267,7 +238,7 @@ class TypeConverterTests(unittest.TestCase):
         def test_float_to_str(x: Test):
             return x.t
 
-        @self.converter.auto_convert(sub_class=True)
+        @self.converter.auto_convert()
         def test_switch(x: str):
             return x
 
@@ -279,7 +250,7 @@ class TypeConverterTests(unittest.TestCase):
         def test_union(x: list | float):
             return x
 
-        @self.converter.auto_convert(sub_class=True)
+        @self.converter.auto_convert()
         def test_structural(x: list[str]):
             return x
 
@@ -366,11 +337,11 @@ class TypeConverterTests(unittest.TestCase):
         def convert_dict_to_b(data: dict):
             return B(data["name"], data["phone"], data["address"])
 
-        @t.auto_convert(protocol=True)
+        @t.auto_convert()
         def test(a: str):
             return a
 
-        @t.auto_convert(protocol=True)
+        @t.auto_convert()
         def tests(a: list[str]):
             return a
 
@@ -454,7 +425,7 @@ class TypeConverterTests(unittest.TestCase):
         async def test_float_to_str(x: Test):
             return x.t
 
-        @t.async_auto_convert(sub_class=True)
+        @t.async_auto_convert()
         async def test_switch(x: str):
             return x
 
@@ -556,11 +527,11 @@ class TypeConverterTests(unittest.TestCase):
         def convert_dict_to_b(data: dict):
             return B(data["name"], data["phone"], data["address"])
 
-        @t.auto_convert(protocol=True)
+        @t.auto_convert()
         async def test(a: str):
             return a
 
-        @t.auto_convert(protocol=True)
+        @t.auto_convert()
         async def tests(a: list[str]):
             return a
 
