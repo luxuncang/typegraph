@@ -640,8 +640,8 @@ class PdtConverter:
         self.tG = nx.DiGraph()
         self.qG = nx.DiGraph()
 
-    def get_graph(self):
-        return nx.all.compose_all([self.G, self.sG, self.qG])
+    def get_graph(self, graphs: Optional[list[nx.DiGraph]] = None):
+        return nx.all.compose_all([self.G, self.sG, self.qG] + (graphs or []))
 
     def _gen_graph(self, in_type: Type[In], out_type: Type[Out], deep: int = 2):
         tmp_G = nx.DiGraph()
@@ -973,14 +973,14 @@ class PdtConverter:
             line_style = "--" if edge[2].get("line", False) else "-.-"
             text += f'{get_node_name(edge[0])}["{get_name(edge[0])}"] {line_style}> {get_node_name(edge[1])}["{get_name(edge[1])}"]\n'
         text += "```"
-
+        print(text)
         display(Markdown(text))
 
     def get_all_paths(self, in_value, out_type: Type[Out]):
         source, target = [], []
         in_type = deep_type(in_value)
-        self._gen_graph(in_type, out_type)
-        for node in self.get_graph().nodes():
+        graph = self._gen_graph(in_type, out_type)
+        for node in self.get_graph([graph]).nodes():
             if self.like_isinstance(in_value, node):
                 source.append(node)
             if self.like_issubclass(out_type, node):

@@ -2,7 +2,7 @@
 
 # TypeGraph
 
-_**TypeGraph** 是一个 Python 库，用于在不同类型之间进行类型转换，包括自定义类型、内置类型和结构类型 (如列表、集合和字典)。它支持同步和异步的转换方法。_
+_**TypeGraph** 是一个 Python 库，用于在不同类型之间进行类型转换，括自定义类型、内置类型和结构类型 (如列表、集合和字典), 同时兼容 `Pydantic Annotated[T, Feild(...)]`。它支持同步和异步的转换方法。_
 
 > 蓦然回首，那人却在灯火阑珊处
 
@@ -15,10 +15,11 @@ _**TypeGraph** 是一个 Python 库，用于在不同类型之间进行类型转
 </div>
 
 ## 功能
-- 注册同步和异步函数的类型转换器。
-- 根据类型注解自动转换函数参数。
-- 支持子类、联合类型和结构类型的转换。
-- 使用 mermaid 语法可视化转换图。
+- 注册同步和异步函数的类型转换器
+- 根据类型注解自动转换函数参数
+- 支持子类、联合类型和结构类型的转换
+- 递归泛型计算
+- 使用 mermaid 语法可视化转换图
 
 ## 安装
 使用以下命令安装运行该库所需的依赖项：
@@ -167,6 +168,101 @@ A-.->Person
 Converting dict[str, str] to <class 'str'> using [<class 'dict'>, <class '__main__.A'>, <class '__main__.Person'>, <class 'str'>], <function TypeConverter.get_converter.<locals>.<lambda>.<locals>.<lambda> at 0x7f1f3306fac0>
 
 ['John 123 123']
+```
+
+### 递归泛型计算
+ 
+> 默认递归两次
+
+```python
+from typing import Iterable, TypeVar, Annotated
+
+from pydantic import Field
+
+from typegraph import PdtConverter
+
+t = PdtConverter()
+
+K = TypeVar("K")
+V = TypeVar("V")
+
+P = Annotated[int, Field(ge=0, le=10)]
+
+@t.register_generic_converter(dict[K, V], dict[V, K])
+def convert_dict_to_dict(value: dict[K, V]) -> dict[V, K]:
+    return {v: k for k, v in value.items()}
+
+@t.register_generic_converter(V, Iterable[V])
+def convert_to_iterable(value: V) -> Iterable[V]:
+    return [value]
+
+@t.register_converter(P, int)
+def convert_p_to_int(value: P) -> int:
+    return value
+
+try:
+    t.convert(11, P)
+except Exception as e:
+    print(e)
+```
+
+**Pydantic Annotated[T, Feild(...)]**
+
+```bash
+No converter registered for <class 'int'> to typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]
+```
+
+```python
+t.convert(5, P)
+```
+
+```bash
+5
+```
+**dict[K,V]->dict[V,K]**
+
+```python
+t.convert({1: "2", 3: "4"}, dict[int, int], debug=True)
+```
+
+```bash
+Converting dict[int, str] to dict[str, int] using [dict[int, str], dict[str, int]], <function convert_dict_to_dict at 0x7f18e595c3a0>
+{'2': 1, '4': 3}
+```
+
+**V->Iterable[V]**
+
+```python
+t.convert(1, Iterable[Iterable[Iterable[P]]], debug=True)
+```
+
+```bash
+Converting typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])] to typing.Iterable[typing.Iterable[typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]]] using [typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])], typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]], typing.Iterable[typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]], typing.Iterable[typing.Iterable[typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]]]], <function PdtConverter.get_converter.<locals>.<lambda>.<locals>.<lambda> at 0x7f18e46ecf70>
+[[[1]]]
+```
+
+**可视化**
+
+```python
+t.show_mermaid_graph()
+```
+
+```mermaid
+graph TD;
+node0["typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]"] --> node1["int"]
+node0["typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]"] -.-> node2["typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]"]
+node1["int"] -.-> node3["typing.Iterable[int]"]
+node3["typing.Iterable[int]"] -.-> node4["typing.Iterable[typing.Iterable[int]]"]
+node2["typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]"] -.-> node5["typing.Iterable[typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]]"]
+node5["typing.Iterable[typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]]"] -.-> node6["typing.Iterable[typing.Iterable[typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]]]"]
+node7["dict[int, str]"] -.-> node8["dict[str, int]"]
+node7["dict[int, str]"] -.-> node9["typing.Iterable[dict[int, str]]"]
+node8["dict[str, int]"] -.-> node7["dict[int, str]"]
+node8["dict[str, int]"] -.-> node10["typing.Iterable[dict[str, int]]"]
+node9["typing.Iterable[dict[int, str]]"] -.-> node11["typing.Iterable[typing.Iterable[dict[int, str]]]"]
+node10["typing.Iterable[dict[str, int]]"] -.-> node12["typing.Iterable[typing.Iterable[dict[str, int]]]"]
+node6["typing.Iterable[typing.Iterable[typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]]]"] -.-> node13["typing.Iterable[typing.Iterable[typing.Iterable[typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]]]]"]
+node13["typing.Iterable[typing.Iterable[typing.Iterable[typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]]]]"] -.-> node14["typing.Iterable[typing.Iterable[typing.Iterable[typing.Iterable[typing.Iterable[typing.Annotated[int, FieldInfo(annotation=NoneType, required=True, metadata=[Ge(ge=0), Le(le=10)])]]]]]]"]
 ```
 
 ### 自动转换装饰器
