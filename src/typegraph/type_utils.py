@@ -109,7 +109,10 @@ def deep_type(obj, depth: int = 10, max_sample: int = -1):
         else:
             return tuple
     else:
-        return get_generic_type(obj)
+        res = get_generic_type(obj)
+        if res in (type, typing._GenericAlias): # type: ignore
+            return Type[obj]
+        return res
 
 
 def attribute_check(tp, etp):
@@ -213,6 +216,7 @@ def like_issubclass(tp, expected_type):
 
 
 def like_isinstance(obj, expected_type):
+    from .converter import check_typevar_model
     res = False
     try:
         t = TypeAdapter(expected_type)
@@ -220,4 +224,15 @@ def like_isinstance(obj, expected_type):
         res = True
     except Exception:
         ...
-    return res
+    if res:
+        return res
+    if get_real_origin(expected_type) == Type:
+        try:
+            res = check_typevar_model(Type[obj], expected_type)
+            res = True
+        except Exception:
+            ...
+    if res:
+        return res
+    obj_type = deep_type(obj)
+    return check_typevar_model(obj_type, expected_type)
