@@ -768,9 +768,9 @@ class PdtConverter:
             except nx.NetworkXNoPath:
                 ...
 
-    def convert(self, input_value, out_type: Type[Out], debug: bool = False) -> Out:
+    def convert(self, input_value, out_type: Type[Out], debug: bool = False, depth: int = 3) -> Out:
         input_type = deep_type(input_value)
-        for source, target in self.get_all_paths(input_value, out_type):
+        for source, target in self.iter_all_paths(input_value, out_type, depth=depth):
             for path, func in self.get_converter(source, target):
                 if debug:
                     print(f"Converting {source} to {target} using {path}, {func}")
@@ -822,10 +822,10 @@ class PdtConverter:
         raise ValueError(f"No converter registered for {input_type} to {out_type}")
 
     async def async_convert(
-        self, input_value, out_type: Type[Out], debug: bool = False
+        self, input_value, out_type: Type[Out], debug: bool = False, depth: int = 3
     ) -> Out:
         input_type = deep_type(input_value)
-        for source, target in self.get_all_paths(input_value, out_type):
+        for source, target in self.iter_all_paths(input_value, out_type, depth=depth):
             async for path, func in self.async_get_converter(source, target):
                 if debug:
                     print(f"Converting {source} to {target} using {path}, {func}")
@@ -976,19 +976,60 @@ class PdtConverter:
         print(text)
         display(Markdown(text))
 
-    def get_all_paths(self, in_value, out_type: Type[Out]):
-        source, target = [], []
-        in_type = deep_type(in_value)
-        graph = self._gen_graph(in_type, out_type)
-        for node in self.get_graph([graph]).nodes():
-            if self.like_isinstance(in_value, node):
-                source.append(node)
-            if self.like_issubclass(out_type, node):
-                target.append(node)
-            if self.like_issubclass(in_type, node):
-                source.append(node)
+    def iter_all_paths(self, in_value, out_type: Type[Out], depth: int = 3):
+        if depth == 0:
+            return
 
-        return itertools.product(source, target)
+        self.check_connected()
+        paths = self.iter_basis_paths(in_value, out_type)
+        if paths:
+            for source, target in paths:
+                yield source, target
+            return
+
+        self.iter_generic_paths(in_value, out_type, depth)
+
+        yield from self.iter_all_paths(in_value, out_type, depth - 1)
+
+    def iter_generic_paths(self, in_value, out_type: Type[Out], depth: int = 3):
+        
+        if depth == 0:
+            return
+
+        for u, v, c in self.tG.edges(data=True):
+            um = gen_typevar_model(u)
+            vm = gen_typevar_model(v)
+            combos = [(um, out_type), (vm, out_type)]
+            for t, i in combos:
+                try:
+                    mapping = extract_typevar_mapping(t, i)
+                    if mapping:
+                        new_in, new_out = um.get_instance(mapping), vm.get_instance(mapping)
+                        self.qG.add_edge(
+                            new_in, new_out, **c
+                        )
+                        self.iter_generic_paths(in_value, new_in, depth - 1) # type: ignore
+                except Exception:
+                    ...
+
+    def iter_basis_paths(self, in_value, out_type: Type[Out]):
+        source, target = set(), set()
+        in_type = deep_type(in_value)
+        for node in self.get_graph().nodes():
+            if self.like_isinstance(in_value, node):
+                source.add(node)
+            if self.like_issubclass(out_type, node):
+                target.add(node)
+            if self.like_issubclass(in_type, node):
+                source.add(node)
+        return list(itertools.product(source, target))
+
+    def check_connected(self, graphs: Optional[list[nx.DiGraph]] = None):
+        G = self.get_graph(graphs)
+        nodes = list(G.nodes())
+        for source, target in itertools.combinations(nodes, 2):
+            if self.like_issubclass(source, target):
+                self.sG.add_edge(source, target, line=False, converter=lambda x: x)
 
     def like_issubclass(self, obj, cls: Type):
         return check_typevar_model(obj, cls)
